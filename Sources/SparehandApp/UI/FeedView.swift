@@ -10,7 +10,7 @@ struct FeedView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                HandMark(size: 13, color: .white).frame(width: 24, height: 24).background(Theme.decide, in: RoundedRectangle(cornerRadius: 7))
+                SparehandLogo(size: 24)
                 Text("Sparehand").font(Theme.heading(16)).foregroundStyle(Theme.ink)
                 Spacer()
                 Circle().fill(model.isPaused ? Theme.pending : Theme.working).frame(width: 7, height: 7)

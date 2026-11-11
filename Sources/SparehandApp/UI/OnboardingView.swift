@@ -41,7 +41,7 @@ struct OnboardingView: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 18) {
-                HandMark(size: 26, color: .white).frame(width: 48, height: 48).background(Theme.decide, in: RoundedRectangle(cornerRadius: 14))
+                SparehandLogo(size: 52)
                 Text("A spare pair of hands for your Mac").font(Theme.heading(28)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
                 Text("Sparehand notices what's worth doing while you work, asks first, then does it.")
                     .font(.system(size: 14)).foregroundStyle(Theme.body).fixedSize(horizontal: false, vertical: true)

@@ -122,6 +122,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onboarding = w
         }
         onboarding?.center()
+        if CommandLine.arguments.contains("--film"), let retina = NSScreen.screens.first(where: { $0.backingScaleFactor >= 2 }), let w = onboarding {
+            w.setFrameOrigin(NSPoint(x: retina.visibleFrame.midX - w.frame.width / 2, y: retina.visibleFrame.midY - w.frame.height / 2))
+        }
         onboarding?.makeKeyAndOrderFront(nil)
         NSApp.activate()
     }

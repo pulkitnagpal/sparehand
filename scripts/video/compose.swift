@@ -80,6 +80,19 @@ let cards = film("cards"), dashForYou = film("dash-for-you"), sortDetail = film(
 let noteDetail = film("note-detail"), today = film("dash-today"), repeatCards = film("repeat-cards")
 let sortCards = frames("sort-card-"), binCards = frames("bin-card-"), notes = frames("note-notes-"), sortDone = film("sort-done-card"), binDone = film("bin-done-card")
 let noteDone = film("note-done-dash")
+let welcome = film("welcome")
+/// The live viewer shows Sparehand's whole screen; cover the Notes list column so no other note is ever visible.
+func maskList(_ img: CGImage) -> CGImage {
+    let w = img.width, h = img.height
+    let c = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    c.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+    // The list column of the Notes window inside the 960×830 viewer (top-left coords 316…446 × 208…592).
+    let sx = CGFloat(w) / 960, sy = CGFloat(h) / 830
+    c.setFillColor(rgb(0x262629)); c.fill(CGRect(x: 316 * sx, y: CGFloat(h) - 592 * sy, width: 130 * sx, height: 384 * sy))
+    return c.makeImage()!
+}
+let liveFrames = frames("note-live-").map(maskList)
 func cropX(_ img: CGImage?, from: CGFloat) -> CGImage? {
     guard let img else { return nil }
     return img.cropping(to: CGRect(x: CGFloat(img.width) * from, y: 0, width: CGFloat(img.width) * (1 - from), height: CGFloat(img.height)))
@@ -255,8 +268,10 @@ let intro: Scene = (0, 4.2, { t in
     text("Sparehand", W / 2 - wordW / 2 - 40, 560 + (1 - w1) * 30, size: 112, weight: .bold, color: rgb(0xFFFFFF), alpha: w1, rounded: true, kern: -2)
     let v = spring(seg(t, 1.5, 2.3))
     pill("1.0", W / 2 + wordW / 2 + 10, 588 + (1 - v) * 20, size: 34, fg: rgb(0xFFFFFF), bg: ORANGE, alpha: clamp(v * 1.5))
-    text("A spare pair of hands for your Mac.", W / 2, 730 + (1 - easeOut(seg(t, 1.9, 2.5))) * 18, size: 38, weight: .medium,
-         color: rgb(0xFFFFFF, 0.7), alpha: easeOut(seg(t, 1.9, 2.5)), center: true)
+    text("An AI agent for your Mac.", W / 2, 720 + (1 - easeOut(seg(t, 1.9, 2.5))) * 18, size: 42, weight: .semibold,
+         color: rgb(0xFFFFFF, 0.88), alpha: easeOut(seg(t, 1.9, 2.5)), center: true)
+    text("It notices what's worth doing, asks first, then does it.", W / 2, 784 + (1 - easeOut(seg(t, 2.2, 2.8))) * 14, size: 30, weight: .medium,
+         color: rgb(0xFFFFFF, 0.6), alpha: easeOut(seg(t, 2.2, 2.8)), center: true)
     // Light wipe into the product.
     let wipe = easeInOut(seg(t, 3.5, 4.2))
     if wipe > 0 {
@@ -310,7 +325,7 @@ let notices: Scene = (8.8, 13.4, { t in
         let band = (ch - 30) / 3
         spotlight(CGRect(x: cx + 16, y: cy + 16 + CGFloat(i) * band, width: cw - 32, height: band - 14), alpha: a)
     }
-    caption("Sparehand noticed three things.", "Nobody told it what to look for.", t: t, start: 9.2, end: 13.4, y: 400)
+    caption("The agent found three things.", "Each worth doing. Nobody told it what to look for.", t: t, start: 9.2, end: 13.4, y: 400)
 })
 
 let details: Scene = (13.4, 19.4, { t in
@@ -450,6 +465,143 @@ let research: Scene = (30.6, 44.6, { t in
     caption("A plan you can pick up later.", nil, t: t, start: 43.2, end: 44.6, x: 260, y: 60)
 })
 
+
+let setup: Scene = (4.2, 7.9, { t in
+    paper()
+    let w: CGFloat = 980, h = imageHeight(welcome, width: w)
+    let x: CGFloat = 820, y = (H - h) / 2 + 30
+    let k = easeOut(seg(t, 4.2, 4.9))
+    image(welcome, x + (1 - k) * 60, y, width: w, alpha: k, radius: 14, shadow: 1)
+    // Focus on "Connect Claude · Connected" (its row in the window, as fractions of the capture).
+    let f = easeOut(seg(t, 5.3, 5.8)) * (1 - easeOut(seg(t, 7.4, 7.9)))
+    spotlight(CGRect(x: x + w * 0.405, y: y + h * 0.193, width: w * 0.555, height: h * 0.095), alpha: f, radius: 14)
+    caption("Connect Claude once.", "That's the agent's brain. Your files never leave your Mac.", t: t, start: 4.5, end: 7.9, x: 110, y: 430)
+})
+
+let looking: Scene = (8.8, 11.6, { t in
+    messy.draw(8.79)
+    // A soft scan passes over the Mac, and the agent tags what it notices.
+    let p = easeInOut(seg(t, 9.0, 10.5))
+    if p > 0 && p < 1 {
+        let x = lerp(-200, W + 200, p)
+        let g = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB), colors: [rgb(0x0F766E, 0), rgb(0x0F766E, 0.16), rgb(0x0F766E, 0)] as CFArray, locations: [0, 0.5, 1])!
+        ctx.drawLinearGradient(g, start: CGPoint(x: x - 160, y: 0), end: CGPoint(x: x + 160, y: 0), options: [])
+    }
+    func tag(_ s: String, _ x: CGFloat, _ y: CGFloat, _ at: CGFloat) {
+        let k = easeOut(seg(t, at, at + 0.35))
+        pill("●  " + s, x, y + (1 - k) * 10, size: 21, fg: INK, bg: rgb(0xFFFFFF), alpha: k)
+    }
+    tag("\(shots.count) screenshots · oldest 8 months", 330, 560, 9.45)
+    tag("\(installers.count) old installers · \(freed)", 1250, 590, 10.15)
+    tag("5 tabs about one trip", 1300, 360, 10.25)
+    caption("The agent looks at your Mac.", "Desktop, downloads, tabs, apps. Every few minutes, quietly.", t: t, start: 8.9, end: 11.6, y: 90)
+})
+
+/// Big jobs: your screen and Sparehand's own (virtual) screen, side by side in a space you can move between.
+let readingLines: [(CGFloat, String)] = {
+    var out: [(CGFloat, String)] = [(34.0, "Claude is reading 5 pages")]
+    let pages = ["Japan Rail Pass", "Kyoto Travel Guide", "Cherry Blossoms", "Tokyo City Guide", "Osaka Travel Guide"]
+    for (i, p) in pages.enumerated() { out.append((34.5 + CGFloat(i) * 0.35, "Reading " + p + "…")) }
+    for n in 1...14 { out.append((37.0 + CGFloat(n - 1) * 0.28, "Writing the note · \(n) of 14")) }
+    out.append((41.0, "Wrote “Japan Trip Planning” in Notes"))
+    return out
+}()
+
+let researchSpace: Scene = (30.6, 47.6, { t in
+    fill(NIGHT)
+    glow(CGPoint(x: 520, y: 500), 700, rgb(0xF0752E, 0.10))
+    glow(CGPoint(x: 1400, y: 500), 700, rgb(0x0F766E, 0.16))
+    let you = CGRect(x: 120, y: 260, width: 800, height: 500)
+    let spare = CGRect(x: 1000, y: 260, width: 800, height: 500)
+    let youC = CGPoint(x: you.midX, y: you.midY), spareC = CGPoint(x: spare.midX, y: spare.midY), mid = CGPoint(x: W / 2, y: 520)
+
+    // Camera keyframes: close on your screen, pull back to both, push into Sparehand's, back to yours.
+    var scale: CGFloat = 1.6, focus = youC
+    let b = easeInOut(seg(t, 32.4, 33.8)), d = easeInOut(seg(t, 36.2, 37.3)), e = easeInOut(seg(t, 41.2, 42.3))
+    scale = lerp(1.6, 1.0, b); focus = lerpPt(CGPoint(x: youC.x, y: youC.y - 40), mid, b)
+    // Leave headroom above the screens for the captions.
+    let spareF = CGPoint(x: spareC.x, y: spareC.y - 70), youF = CGPoint(x: youC.x, y: youC.y - 70)
+    if d > 0 { scale = lerp(1.0, 1.5, d); focus = lerpPt(mid, spareF, d) }
+    if e > 0 { scale = lerp(1.5, 1.5, e); focus = lerpPt(spareF, youF, e) }
+
+    func bezel(_ r: CGRect, accent: CGColor, alpha a: CGFloat) {
+        ctx.saveGState(); ctx.setAlpha(a)
+        ctx.setShadow(offset: CGSize(width: 0, height: -20), blur: 60, color: rgb(0, 0.5))
+        ctx.addPath(CGPath(roundedRect: R(r.minX - 12, r.minY - 12, r.width + 24, r.height + 24), cornerWidth: 26, cornerHeight: 26, transform: nil))
+        ctx.setFillColor(rgb(0x0B0B0E)); ctx.fillPath()
+        ctx.restoreGState()
+        ctx.saveGState(); ctx.setAlpha(a); ctx.setStrokeColor(accent); ctx.setLineWidth(2)
+        ctx.addPath(CGPath(roundedRect: R(r.minX - 12, r.minY - 12, r.width + 24, r.height + 24), cornerWidth: 26, cornerHeight: 26, transform: nil)); ctx.strokePath()
+        ctx.restoreGState()
+    }
+    func clipTo(_ r: CGRect, _ draw: () -> Void) {
+        ctx.saveGState(); ctx.addPath(CGPath(roundedRect: R(r.minX, r.minY, r.width, r.height), cornerWidth: 14, cornerHeight: 14, transform: nil)); ctx.clip()
+        draw(); ctx.restoreGState()
+    }
+
+    camera(scale: scale, focus: focus) {
+        // Your screen: the browser, the card you clicked, and (later) the live viewer in the corner.
+        bezel(you, accent: rgb(0xFFFFFF, 0.10), alpha: 1)
+        clipTo(you) {
+            ctx.setFillColor(PAPER); ctx.fill(R(you.minX, you.minY, you.width, you.height))
+            glow(CGPoint(x: you.maxX - 100, y: you.minY + 60), 400, rgb(0xF0752E, 0.10))
+            let tab = tabs.isEmpty ? nil : tabs[min(4, max(0, Int((t - 34.5) / 0.35)))]
+            image(t < 34.5 ? tabs.first : tab, you.minX + 30, you.minY + 30, width: you.width * 0.70, radius: 8, shadow: 0.4)
+            // The research card (top of the real stack) and the click on Write note.
+            if let c = cards, let card = c.cropping(to: CGRect(x: 0, y: 0, width: CGFloat(c.width), height: CGFloat(c.height) * 0.355)) {
+                let a = 1 - easeOut(seg(t, 33.0, 33.6))
+                image(card, you.maxX - 250, you.minY + 24, width: 230, alpha: a, shadow: 0)
+                ripple(CGPoint(x: you.maxX - 250 + 230 * 0.17, y: you.minY + 24 + 230 * CGFloat(card.height) / CGFloat(card.width) * 0.62), seg(t, 31.6, 32.3))
+            }
+            // The live viewer: Sparehand's screen, mirrored small on yours.
+            let pv = easeOut(seg(t, 41.6, 42.3))
+            if pv > 0, !liveFrames.isEmpty {
+                let i = min(liveFrames.count - 1, Int(seg(t, 42.3, 45.8) * CGFloat(liveFrames.count - 1)))
+                image(liveFrames[i], you.maxX - 290, you.maxY - 260 + (1 - pv) * 40, width: 270, alpha: pv, radius: 10, shadow: 0.8)
+            }
+        }
+        // Sparehand's screen slides in beside yours.
+        let s = easeOut(seg(t, 32.6, 33.8))
+        let sr = spare.offsetBy(dx: (1 - s) * 500, dy: 0)
+        bezel(sr, accent: rgb(0x14B8A6, 0.55), alpha: s)
+        if s > 0 {
+            clipTo(sr) {
+                ctx.setFillColor(rgb(0x202227)); ctx.fill(R(sr.minX, sr.minY, sr.width, sr.height))
+                if !noteFrames.isEmpty && t > 35.2 {
+                    let i = min(noteFrames.count - 1, Int(seg(t, 35.6, 41.0) * CGFloat(noteFrames.count - 1)))
+                    let n = noteFrames[i]
+                    let nh = sr.height - 50, nw = nh * CGFloat(n.width) / CGFloat(n.height)
+                    image(n, sr.midX - nw / 2, sr.minY + 25, width: nw, alpha: easeOut(seg(t, 35.2, 35.7)), radius: 8, shadow: 0.6)
+                }
+            }
+            pill("Your screen", you.midX, you.maxY + 30, size: 18, fg: rgb(0xFFFFFF, 0.85), bg: rgb(0xFFFFFF, 0.10), alpha: b, center: true)
+            pill("Sparehand's screen", sr.midX, sr.maxY + 30, size: 18, fg: rgb(0xFFFFFF), bg: rgb(0x0F766E), alpha: s, center: true)
+            // What the agent is doing, from the real run.
+            if let line = readingLines.last(where: { t >= $0.0 })?.1, t < 46.5 {
+                text(line, sr.midX, sr.maxY + 84, size: 20, weight: .medium, color: rgb(0xFFFFFF, 0.75), alpha: s, center: true)
+            }
+        }
+        // The tabs travel across into Sparehand's screen.
+        if let strip = tabs.first {
+            let ranges: [(CGFloat, CGFloat)] = [(205, 590), (620, 1043), (1069, 1472), (1504, 1907), (1933, 2342)]
+            let bw = you.width * 0.70, sc = bw / CGFloat(strip.width)
+            for (i, r) in ranges.enumerated() {
+                let st = 34.1 + CGFloat(i) * 0.35
+                let k = easeInOut(seg(t, st, st + 0.9))
+                guard k > 0, k < 1, let chip = strip.cropping(to: CGRect(x: r.0, y: 0, width: r.1 - r.0, height: 80)) else { continue }
+                let from = CGPoint(x: you.minX + 30 + r.0 * sc, y: you.minY + 30)
+                let to = CGPoint(x: spare.minX + 260, y: spare.minY + 120 + CGFloat(i) * 46)
+                let m = CGPoint(x: (from.x + to.x) / 2, y: min(from.y, to.y) - 110)
+                let p = lerpPt(lerpPt(from, m, k), lerpPt(m, to, k), k)
+                image(chip, p.x, p.y, width: (r.1 - r.0) * sc * 1.5, alpha: 1 - easeOut(seg(k, 0.8, 1)), radius: 6, shadow: 0.6)
+            }
+        }
+    }
+    caption("The agent works on its own screen.", "A virtual display only Sparehand uses. Your screen stays yours.", t: t, start: 32.8, end: 36.3, x: 120, y: 70, dark: true)
+    caption("It reads your five tabs and writes the plan.", nil, t: t, start: 36.6, end: 41.2, x: 120, y: 70, dark: true)
+    caption("Watch it from your screen, any time.", "Or don't. It keeps working either way.", t: t, start: 42.0, end: 47.4, x: 120, y: 70, dark: true)
+})
+
 let undo: Scene = (44.6, 48.2, { t in
     paper()
     let k = easeOut(seg(t, 44.6, 45.3))
@@ -479,7 +631,7 @@ let outro: Scene = (51.8, 57.0, { t in
     image(logo, W / 2 - 100, 200, width: 200, alpha: clamp(k * 2), shadow: 0.5, scale: 0.6 + 0.4 * k)
     let a = easeOut(seg(t, 52.4, 53.0))
     text("Sparehand 1.0", W / 2, 450, size: 86, weight: .bold, color: rgb(0xFFFFFF), alpha: a, rounded: true, center: true, kern: -1.5)
-    text("Asks first  ·  Undo anything  ·  Your files never leave your Mac", W / 2, 580, size: 32, weight: .medium, color: rgb(0xFFFFFF, 0.72),
+    text("An AI agent that asks first  ·  Undo anything  ·  Your files never leave your Mac", W / 2, 580, size: 32, weight: .medium, color: rgb(0xFFFFFF, 0.72),
          alpha: easeOut(seg(t, 53.0, 53.6)), center: true)
     pill("github.com/pulkitnagpal/sparehand", W / 2, 680, size: 26, fg: rgb(0xFFFFFF), bg: ORANGE, alpha: easeOut(seg(t, 53.5, 54.1)), center: true)
     let fade = easeInOut(seg(t, 56.3, 57.0))
@@ -487,8 +639,10 @@ let outro: Scene = (51.8, 57.0, { t in
 })
 
 func shifted(_ s: Scene, _ by: CGFloat) -> Scene { (s.start + by, s.end + by, { t in s.draw(t - by) }) }
-let gap: CGFloat = 3.6
-let scenes: [Scene] = [intro, messy, notices, details, sorting, beforeAfter] + [binning, research, undo, learns, outro].map { shifted($0, gap) }
+let scenes: [Scene] = [intro, setup, shifted(messy, 3.7), shifted(looking, 3.7)]
+    + [notices, details, sorting, beforeAfter].map { shifted($0, 6.5) }
+    + [shifted(binning, 10.1), shifted(researchSpace, 10.1)]
+    + [undo, learns, outro].map { shifted($0, 13.1) }
 let total = scenes.last!.end
 
 // MARK: - render
@@ -507,7 +661,7 @@ for f in 0..<frameCount {
         guard let scene = scenes.first(where: { t >= $0.start && t < $0.end }) ?? scenes.last else { return }
         scene.draw(t)
         // A short crossfade from the previous scene keeps cuts soft.
-        if let i = scenes.firstIndex(where: { $0.start == scene.start }), i > 0, t - scene.start < 0.25, scenes[i - 1].end == scene.start, i != 1 {
+        if let i = scenes.firstIndex(where: { $0.start == scene.start }), i > 0, t - scene.start < 0.25, abs(scenes[i - 1].end - scene.start) < 0.01, i != 1 {
             let k = (t - scene.start) / 0.25
             ctx.saveGState(); ctx.setAlpha(1 - easeOut(k))
             ctx.beginTransparencyLayer(auxiliaryInfo: nil); scenes[i - 1].draw(scene.start - 0.001); ctx.endTransparencyLayer()
