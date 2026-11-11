@@ -268,9 +268,9 @@ let intro: Scene = (0, 4.2, { t in
     text("Sparehand", W / 2 - wordW / 2 - 40, 560 + (1 - w1) * 30, size: 112, weight: .bold, color: rgb(0xFFFFFF), alpha: w1, rounded: true, kern: -2)
     let v = spring(seg(t, 1.5, 2.3))
     pill("1.0", W / 2 + wordW / 2 + 10, 588 + (1 - v) * 20, size: 34, fg: rgb(0xFFFFFF), bg: ORANGE, alpha: clamp(v * 1.5))
-    text("An AI agent for your Mac.", W / 2, 720 + (1 - easeOut(seg(t, 1.9, 2.5))) * 18, size: 42, weight: .semibold,
+    text("The proactive agent for your Mac.", W / 2, 720 + (1 - easeOut(seg(t, 1.9, 2.5))) * 18, size: 42, weight: .semibold,
          color: rgb(0xFFFFFF, 0.88), alpha: easeOut(seg(t, 1.9, 2.5)), center: true)
-    text("It notices what's worth doing, asks first, then does it.", W / 2, 784 + (1 - easeOut(seg(t, 2.2, 2.8))) * 14, size: 30, weight: .medium,
+    text("It notices what needs doing, asks once, then does it on its own screen.", W / 2, 784 + (1 - easeOut(seg(t, 2.2, 2.8))) * 14, size: 30, weight: .medium,
          color: rgb(0xFFFFFF, 0.6), alpha: easeOut(seg(t, 2.2, 2.8)), center: true)
     // Light wipe into the product.
     let wipe = easeInOut(seg(t, 3.5, 4.2))
@@ -630,10 +630,11 @@ let outro: Scene = (51.8, 57.0, { t in
     let k = spring(seg(t, 51.9, 52.9))
     image(logo, W / 2 - 100, 200, width: 200, alpha: clamp(k * 2), shadow: 0.5, scale: 0.6 + 0.4 * k)
     let a = easeOut(seg(t, 52.4, 53.0))
-    text("Sparehand 1.0", W / 2, 450, size: 86, weight: .bold, color: rgb(0xFFFFFF), alpha: a, rounded: true, center: true, kern: -1.5)
-    text("An AI agent that asks first  ·  Undo anything  ·  Your files never leave your Mac", W / 2, 580, size: 32, weight: .medium, color: rgb(0xFFFFFF, 0.72),
-         alpha: easeOut(seg(t, 53.0, 53.6)), center: true)
-    pill("github.com/pulkitnagpal/sparehand", W / 2, 680, size: 26, fg: rgb(0xFFFFFF), bg: ORANGE, alpha: easeOut(seg(t, 53.5, 54.1)), center: true)
+    text("Sparehand 1.0", W / 2, 440, size: 86, weight: .bold, color: rgb(0xFFFFFF), alpha: a, rounded: true, center: true, kern: -1.5)
+    text("The proactive agent for your Mac.", W / 2, 560, size: 40, weight: .semibold, color: rgb(0xFFFFFF, 0.9), alpha: easeOut(seg(t, 52.8, 53.4)), center: true)
+    text("Asks first  ·  Undo anything  ·  Your files stay on your Mac", W / 2, 624, size: 28, weight: .medium, color: rgb(0xFFFFFF, 0.6),
+         alpha: easeOut(seg(t, 53.2, 53.8)), center: true)
+    pill("github.com/pulkitnagpal/sparehand", W / 2, 710, size: 26, fg: rgb(0xFFFFFF), bg: ORANGE, alpha: easeOut(seg(t, 53.5, 54.1)), center: true)
     let fade = easeInOut(seg(t, 56.3, 57.0))
     if fade > 0 { ctx.setFillColor(rgb(0, fade)); ctx.fill(CGRect(x: 0, y: 0, width: W, height: H)) }
 })

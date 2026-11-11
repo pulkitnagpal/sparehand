@@ -2,9 +2,11 @@
 
 # Sparehand 1.0
 
-**A spare pair of hands for your Mac.** Sparehand notices what's worth doing while you work, asks first, then does it.
+**The proactive agent for your Mac.** Sparehand notices what needs doing while you work, asks once, then does it, the big jobs on a screen of its own that you can watch.
 
-<!-- demo video goes here -->
+[![Watch the Sparehand 1.0 film](docs/film-poster.png)](https://github.com/pulkitnagpal/sparehand/releases/download/v1.0.0/sparehand-1.0.mp4)
+
+*Watch the 70-second film. Every window, card and note in it is from a real run.*
 
 It lives in your menu bar, with a main window that lists what it found, what it did today (each with Undo) and what it has learned. Every few minutes it takes a quiet look at your Mac (your Desktop and Downloads, open tabs, apps, memory, disk) and offers at most three things, as small cards:
 
