@@ -213,6 +213,7 @@ final class TapPanel {
         if let i = stack.taps.firstIndex(where: { $0.id == tap.id }) { stack.taps[i] = tap } else { stack.taps.insert(tap, at: 0) }
         stack.expanded.remove(tap.id)
         stack.phases[tap.id] = phase
+        model?.phases[tap.id] = phase
         relayout(fade: false)
     }
 
@@ -232,10 +233,14 @@ final class TapPanel {
         }
         stack.phases[id] = nil
         stack.expanded.remove(id)
+        model?.forget(id)
         relayout(fade: false)
     }
 
     func hide() { stack.taps = []; panel.orderOut(nil) }
+
+    /// For filming: the panel's window number.
+    var windowNumber: Int { panel.windowNumber }
 
     func toggle(_ id: String) {
         if stack.expanded.contains(id) { stack.expanded.remove(id) } else { stack.expanded.insert(id) }

@@ -67,7 +67,9 @@ public enum BrowserTabs {
     /// Tabs from every running browser. A browser that refuses (no Automation permission) contributes nothing.
     public static func all(runner: ScriptRunner, running: Set<String>) async -> [Tab] {
         var tabs: [Tab] = []
-        for app in chromeFamily + ["Safari"] where running.contains(app) {
+        // SPAREHAND_BROWSERS (comma-separated app names) limits which browsers Sparehand may read.
+        let allowed = ProcessInfo.processInfo.environment["SPAREHAND_BROWSERS"].map { Set($0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }) }
+        for app in chromeFamily + ["Safari"] where running.contains(app) && (allowed?.contains(app) ?? true) {
             let script = app == "Safari" ? safariListScript() : listScript(app: app)
             guard let out = try? await runner.run(script) else { continue }
             tabs += parse(out, browser: app)

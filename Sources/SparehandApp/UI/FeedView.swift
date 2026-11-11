@@ -5,6 +5,7 @@ import SwiftUI
 struct FeedView: View {
     @ObservedObject var model: AppModel
     var openOnboarding: () -> Void
+    var openWindow: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -72,6 +73,7 @@ struct FeedView: View {
                 Button(model.isPaused ? "Resume" : "Pause") { model.isPaused ? model.resume() : model.pause(hours: 1) }
                     .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Theme.body)
                 Spacer()
+                Button("Open", action: openWindow).buttonStyle(.plain).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.decide)
                 Button("Settings", action: openOnboarding).buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Theme.body)
                 Button("Quit") { NSApp.terminate(nil) }.buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Theme.muted)
             }

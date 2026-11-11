@@ -13,6 +13,7 @@ cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp "$BIN/SparehandApp" "$APP/Contents/MacOS/Sparehand"
 cp "$BIN/sparehand" "$APP/Contents/Resources/sparehand"
 cp scripts/judge-server.sh "$APP/Contents/Resources/judge-server.sh"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp "$BIN/sparehand" dist/sparehand
 if security find-identity -v -p codesigning | grep -q "Sparehand Dev"; then
   codesign --force --deep --sign "Sparehand Dev" "$APP"

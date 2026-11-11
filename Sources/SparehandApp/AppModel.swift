@@ -37,6 +37,13 @@ final class AppModel: ObservableObject {
     @Published var busyTapID: String?
     @Published var lastLook: [String] = []
     @Published var localReady = false
+    /// Each card's phase, shared by the pop-up cards and the main window.
+    @Published var phases: [String: CardPhase] = [:]
+    /// Cards acted on this session, kept visible (with their progress and result) until they're cleared.
+    @Published var acted: [Tap] = []
+    @Published var selectedOfferID: String?
+    @Published var memoryLines: [String] = []
+    @Published var section: DashboardView.Section = .forYou
 
     let store: Store
     let env: SparehandCore.Environment
@@ -55,6 +62,14 @@ final class AppModel: ObservableObject {
         env = SparehandCore.Environment.live(store: store)
         claude = Claude.fromKeychain()
         engine = Self.makeEngine(env: env, claude: claude)
+    }
+
+    /// A card left the screen: stop showing its finished state in the window too.
+    func forget(_ id: String) {
+        guard let p = phases[id], p != .offer else { return }
+        if case .working = p { return }
+        acted.removeAll { $0.id == id }
+        phases[id] = nil
     }
 
     /// --demo: for walkthroughs and recordings. No card limits or quiet times, and new files are looked at within seconds.
@@ -111,13 +126,20 @@ final class AppModel: ObservableObject {
         let f = await engine.feed()
         pending = f.pending
         done = f.done
+        memoryLines = await engine.memory()
     }
 
     func approve(_ tap: Tap) {
+        if !acted.contains(where: { $0.id == tap.id }) { acted.insert(tap, at: 0) }
+        selectedOfferID = tap.id
         tapPanel.set(tap, .working(tap.candidate.steps.contains { WatchableRun.watched.contains($0.tool) } ? "Starting on Sparehand's screen…" : "Starting…"))
         busyTapID = tap.id
         Task {
-            let result = await runner.run(tap) { [weak self] line in self?.tapPanel.set(tap, .working(line)) }
+            let result = await runner.run(tap) { [weak self] line in
+                print(String(format: "[progress] %.2f %@ %@", Date().timeIntervalSince1970, tap.id, line))
+                self?.tapPanel.set(tap, .working(line))
+            }
+            print(String(format: "[result] %.2f %@ %@", Date().timeIntervalSince1970, tap.id, result?.note ?? "-"))
             busyTapID = nil
             if let r = result {
                 tapPanel.set(r, r.state == .failed ? .failed(r.note ?? "Something went wrong.") : .done(r.note ?? "Done"))

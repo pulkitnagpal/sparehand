@@ -1,10 +1,12 @@
-# Sparehand
+<p align="center"><img src="docs/logo.png" width="120" alt="Sparehand"></p>
+
+# Sparehand 1.0
 
 **A spare pair of hands for your Mac.** Sparehand notices what's worth doing while you work, asks first, then does it.
 
 <!-- demo video goes here -->
 
-It lives in your menu bar. Every few minutes it takes a quiet look at your Mac (your Desktop and Downloads, open tabs, apps, memory, disk) and offers at most three things, as small cards:
+It lives in your menu bar, with a main window that lists what it found, what it did today (each with Undo) and what it has learned. Every few minutes it takes a quiet look at your Mac (your Desktop and Downloads, open tabs, apps, memory, disk) and offers at most three things, as small cards:
 
 - **Sort 80 Desktop screenshots.** It reads each one and files it by what it shows: Travel, Receipts, Chats…
 - **Bin old installers.** It frees 2.4 GB, and it's undoable.
@@ -48,6 +50,11 @@ macOS asks once before Sparehand controls Finder, Notes or your browser.
 5. **Act.** On your tap, Sparehand does it itself, records every change for Undo, and learns the plan as a skill.
 
 All decisions are logged on your Mac in `~/Library/Application Support/Sparehand/`.
+
+## The demo film
+
+`scripts/demo-setup.sh` builds a messy scene in a throwaway folder; the app's `--film` mode drives the real product through it and
+captures its own windows; `scripts/video/make-film.sh` stages those captures into the film. Every card, plan and result in it comes from that real run.
 
 ## Develop
 

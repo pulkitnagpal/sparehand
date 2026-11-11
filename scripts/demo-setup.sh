@@ -54,8 +54,9 @@ for spec in "Zoom.pkg:140m" "Slack-4.41.105.dmg:190m" "Figma-125.4.9.dmg:270m" "
   i=$((i + 1))
 done
 
-# Browser: a window of its own with the trip tabs.
+# Browser: a window of its own with the trip tabs (SPAREHAND_DEMO_NO_BROWSER=1 skips this, for filming with a clean profile).
 APP=$(browser)
+if [[ -n "$SPAREHAND_DEMO_NO_BROWSER" ]]; then APP="none"; WID=""; else
 URLS=(https://www.japan-guide.com/e/e2361.html https://www.japan-guide.com/e/e2158.html https://www.japan-guide.com/e/e2011.html
       https://www.japan-guide.com/e/e2164.html https://www.japan-guide.com/e/e2157.html)
 if [[ "$APP" == "Safari" ]]; then
@@ -71,6 +72,7 @@ else
 fi
 SCRIPT+=$'\n'"  return id of w"$'\n'"end tell"
 WID=$(osascript -e "$SCRIPT")
+fi
 echo "$APP $WID" > "$STATE"
 
 # The tabs have been open a few days (as Sparehand would have recorded if it had been running).
