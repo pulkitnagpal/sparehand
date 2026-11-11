@@ -75,6 +75,13 @@ let sortAnswer = """
         #expect(p.repeatTitle == "Sort {count} new screenshots")
     }
 
+    @Test func parsesUpToThreeOffers() {
+        let one = #"{"steps": [{"tool": "show_report", "args": {"text": "x"}}], "card_title": "A", "card_body": "b", "confidence": 4}"#
+        let text = "{\"offers\": [\(one), \(one), \(one), \(one)]}"
+        #expect(Gate.parseAll(text).count == 3)
+        #expect(Gate.parseAll(#"{"offers": []}"#).isEmpty)
+    }
+
     @Test func silenceIsNil() {
         #expect(Gate.parse(#"{"propose": false, "steps": []}"#) == nil)
         #expect(Gate.parse("not json") == nil)
@@ -148,12 +155,14 @@ let sortAnswer = """
         #expect(!d.exists("Desktop/Screenshot 0.png"))
         #expect(Skills.all(env.store).count == 1)
 
-        // New screenshots: the skill offers on this Mac, Claude isn't asked.
+        // New screenshots: the skill makes the card on this Mac. Claude may still look at the rest,
+        // but its offer for the same files is dropped as an overlap.
         for i in 10..<16 { try d.file("Desktop/Screenshot \(i).png") }
         let second = await engine.look(force: true)
+        #expect(second.taps.count == 1)
         let local = try #require(second.taps.first)
         #expect(local.candidate.origin == .skill)
-        #expect(calls.value == 1)
+        #expect(second.steps.contains("  skipped: overlaps another card"))
 
         // Undo puts the first batch back.
         let undone = try #require(await engine.undo("organise"))
@@ -172,7 +181,7 @@ let sortAnswer = """
         #expect(await engine.memory().first?.contains("Sort 6 screenshots") == true)
         let again = await engine.look(force: true)
         #expect(again.taps.isEmpty)
-        #expect(again.steps.contains("already offered"))
+        #expect(again.steps.contains("  already offered"))
     }
 
     @Test func noClaudeMeansOnlySkills() async throws {

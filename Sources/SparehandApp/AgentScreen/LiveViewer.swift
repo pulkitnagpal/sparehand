@@ -16,6 +16,12 @@ final class LiveViewer: ObservableObject {
     @Published var steps: [LiveStep] = []
     @Published var status = "Getting Sparehand's screen ready…"
     @Published var needsYou = false
+    /// The job is over; the panel stays up showing the result until the user closes it.
+    @Published var finished = false
+    /// Recent lines of what happened ("Screenshot … → Travel"), newest last.
+    @Published var log: [String] = []
+    var onClose: (() -> Void)?
+    var onReveal: (() -> Void)?
     /// One layer per view showing the stream (the picture-in-picture panel and the full-screen window).
     private var layers: [CALayer] = []
 

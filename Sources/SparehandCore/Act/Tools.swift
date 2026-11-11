@@ -135,7 +135,7 @@ public enum Tools {
                 ctx.progress("\(i + 1) of \(files.count) → \(folder)")
             }
             try addUndo(UndoRecord(kind: "moves"), tapID: tapID, store: env.store)
-            return "Sorted \(files.count) into " + counts.sorted { $0.value > $1.value }.map { "\($0.key) (\($0.value))" }.joined(separator: ", ")
+            return "Sorted \(files.count) into \(counts.count) folders"
 
         case "organize_files":
             guard let sel = FileSelector(a["files"]), let into = folderURL(a["into"]?.string ?? "~/Pictures/Screenshots", home: env.home) else { throw ToolError.badArgs("Which files, and where to?") }

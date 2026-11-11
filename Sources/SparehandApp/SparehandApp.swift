@@ -39,7 +39,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         model.start()
         if CommandLine.arguments.contains("--look-now") {   // testing and demos: look once right away
-            Task { try? await Task.sleep(for: .seconds(2)); await model.look(force: true) }
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                await model.look(force: true)
+                if CommandLine.arguments.contains("--approve-first"), let t = model.pending.first {   // testing only
+                    try? await Task.sleep(for: .seconds(2))
+                    model.approve(t)
+                }
+            }
             return
         }
         if (try? model.store.setting("onboarded")) ?? nil == nil { showOnboarding() }

@@ -36,6 +36,7 @@ final class AppModel: ObservableObject {
     @Published var status = "Starting…"
     @Published var busyTapID: String?
     @Published var lastLook: [String] = []
+    @Published var localReady = false
 
     let store: Store
     let env: SparehandCore.Environment
@@ -53,10 +54,18 @@ final class AppModel: ObservableObject {
         catch { fatalError("Sparehand can't open its database: \(error)") }
         env = SparehandCore.Environment.live(store: store)
         claude = Claude.fromKeychain()
-        engine = Engine(env: env, senses: Senses(env: env), local: LocalModel(), claude: claude, quiet: DesktopQuietRules())
+        // --demo: for walkthroughs and recordings. No card limits or quiet times, and new files are looked at within seconds.
+        var limits = Limits()
+        if Self.demo { limits.perHour = 99; limits.perDay = 99; limits.idleSeconds = .infinity }
+        engine = Engine(env: env, senses: Senses(env: env), local: LocalModel(), claude: claude,
+                        quiet: Self.demo ? NeverQuiet() as any QuietRules : DesktopQuietRules(), limits: limits)
     }
 
+    static let demo = CommandLine.arguments.contains("--demo")
+
     func start() {
+        // A job that was running when Sparehand last quit didn't finish.
+        for var t in (try? store.taps(states: [.running])) ?? [] { t.state = .failed; t.note = "Interrupted when Sparehand quit."; try? store.upsert(t) }
         startLocalModel()
         sampleTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in Task { @MainActor in await self.engine.sample() } }
         lookTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { _ in Task { @MainActor in await self.look() } }
@@ -75,7 +84,7 @@ final class AppModel: ObservableObject {
         let r = await engine.look(force: force)
         lastLook = r.steps
         await refreshFeed()
-        if let first = r.taps.first { tapPanel.show(first) }
+        if !r.taps.isEmpty { tapPanel.show(r.taps) }
     }
 
     func refreshFeed() async {
@@ -85,7 +94,7 @@ final class AppModel: ObservableObject {
     }
 
     func approve(_ tap: Tap) {
-        tapPanel.hide()
+        tapPanel.remove(tap.id)
         busyTapID = tap.id
         Task {
             _ = await runner.run(tap)
@@ -95,12 +104,12 @@ final class AppModel: ObservableObject {
     }
 
     func dismiss(_ tap: Tap) {
-        tapPanel.hide()
+        tapPanel.remove(tap.id)
         Task { await engine.dismiss(tap.id); await refreshFeed() }
     }
 
     func never(_ tap: Tap) {
-        tapPanel.hide()
+        tapPanel.remove(tap.id)
         Task { await engine.never(tap.id); await refreshFeed() }
     }
 
@@ -121,7 +130,7 @@ final class AppModel: ObservableObject {
             let out = Pipe(); p.standardOutput = out; p.standardError = out
             try? p.run(); p.waitUntilExit()
             let ok = p.terminationStatus == 0
-            await MainActor.run { self.status = (ok ? "Local model ready" : "Local model unavailable") + " · \(cloud)" }
+            await MainActor.run { self.localReady = ok; self.status = (ok ? "Local model ready" : "Local model unavailable") + " · \(cloud)" }
         }
     }
 
@@ -136,7 +145,7 @@ final class AppModel: ObservableObject {
             pendingLook?.cancel()
             let item = DispatchWorkItem { Task { @MainActor in await self?.look() } }
             pendingLook = item
-            DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: item)
+            DispatchQueue.main.asyncAfter(deadline: .now() + (Self.demo ? 3 : 20), execute: item)
         }
         src.setCancelHandler { close(fd) }
         src.resume()

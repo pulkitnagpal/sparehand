@@ -56,27 +56,30 @@ public actor Engine {
             }
         }
 
+        let maxCards = 3
+        var claimed = Set<String>()   // targets already covered by a card in this look
+
         // 1. Learned skills: no cloud at all.
-        for c in Skills.offers(env: env, now: now) {
+        for c in Skills.offers(env: env, now: now) where r.taps.count < maxCards {
             guard isNew(c.id, now: now) else { continue }
-            if case .success(let checked) = Validator.check(Proposal(steps: c.steps, title: c.repeatTitle ?? "", body: "x", why: c.why,
-                                                                      actionLabel: "x", repeatTitle: nil, confidence: 5), snapshot: snap, env: env) {
-                var cand = c
-                cand.evidence = checked.evidence
-                let skill = Skills.all(store).first { $0.id == c.skillID }
-                let tap = Tap(candidate: cand, verdict: Verdict(title: c.repeatTitle ?? "Same as last time", body: skill?.body ?? "",
-                                                                actionLabel: skill?.actionLabel ?? "Do it", confidence: 5), createdAt: now)
-                try? store.upsert(tap)
-                r.taps.append(tap)
-                r.steps.append("skill matched on this Mac: \(tap.verdict.title)")
-                log["skill"] = c.skillID
-                return r
-            }
+            guard case .success(let checked) = Validator.check(Proposal(steps: c.steps, title: c.repeatTitle ?? "", body: "x", why: c.why,
+                                                                        actionLabel: "x", repeatTitle: nil, confidence: 5), snapshot: snap, env: env) else { continue }
+            var cand = c
+            cand.evidence = checked.evidence
+            let skill = Skills.all(store).first { $0.id == c.skillID }
+            let tap = Tap(candidate: cand, verdict: Verdict(title: c.repeatTitle ?? "Same as last time", body: skill?.body ?? "",
+                                                            actionLabel: skill?.actionLabel ?? "Do it", confidence: 5), createdAt: now)
+            try? store.upsert(tap)
+            r.taps.append(tap)
+            claimed.formUnion(checked.targets)
+            r.steps.append("skill matched on this Mac: \(tap.verdict.title)")
+            log["skill"] = c.skillID
         }
 
         // 2. Nothing salient changed since Claude last looked: stop.
         let lastKey = try? store.setting("last.salient")
         if !force, lastKey == snap.salientKey { r.steps.append("nothing changed since the last look"); return r }
+        guard r.taps.count < maxCards else { return r }
 
         // 3. Local screen.
         if let local {
@@ -90,7 +93,7 @@ public actor Engine {
             }
         }
 
-        // 4. Claude decides.
+        // 4. Claude decides: up to 3 offers, best first.
         guard let claude else { r.steps.append("no Claude connected: only learned skills run"); return r }
         let earlier = ((try? store.taps(since: Calendar.current.startOfDay(for: now))) ?? []).map(\.verdict.title)
         let reply: ClaudeReply
@@ -100,22 +103,28 @@ public actor Engine {
         r.claudeCostUSD = reply.costUSD
         log["claude"] = ["text": reply.text, "cost": reply.costUSD, "backend": claude.label]
         Self.saveSnapshot(snap, at: now)
-        guard let p = Gate.parse(reply.text) else { r.steps.append("Claude: nothing worth offering"); return r }
-        r.steps.append("Claude: \(p.title) [\(p.steps.map(\.tool).joined(separator: ", "))] confidence \(p.confidence)")
+        let proposals = Gate.parseAll(reply.text)
+        if proposals.isEmpty { r.steps.append("Claude: nothing worth offering"); return r }
 
-        // 5. Validate and dedupe.
-        switch Validator.check(p, snapshot: snap, env: env) {
-        case .failure(let f):
-            r.steps.append("rejected: \(f.reason)")
-            log["rejected"] = f.reason
-        case .success(let checked):
-            let id = Fingerprint.make(p.steps.map(\.tool).joined(separator: "+"), checked.targets)
-            guard isNew(id, now: now) else { r.steps.append("already offered"); return r }
-            let cand = Candidate(id: id, origin: .claude, why: p.why, evidence: checked.evidence, steps: p.steps, noticedAt: now, repeatTitle: p.repeatTitle)
-            let tap = Tap(candidate: cand, verdict: Verdict(title: p.title, body: p.body, actionLabel: p.actionLabel, confidence: p.confidence), createdAt: now)
-            try? store.upsert(tap)
-            r.taps.append(tap)
+        // 5. Validate and dedupe each.
+        var rejected: [String] = []
+        for p in proposals where r.taps.count < maxCards {
+            r.steps.append("Claude: \(p.title) [\(p.steps.map(\.tool).joined(separator: ", "))] confidence \(p.confidence)")
+            switch Validator.check(p, snapshot: snap, env: env) {
+            case .failure(let f):
+                r.steps.append("  rejected: \(f.reason)"); rejected.append(f.reason)
+            case .success(let checked):
+                if !claimed.isDisjoint(with: checked.targets) { r.steps.append("  skipped: overlaps another card"); continue }
+                let id = Fingerprint.make(p.steps.map(\.tool).joined(separator: "+"), checked.targets)
+                guard isNew(id, now: now) else { r.steps.append("  already offered"); continue }
+                let cand = Candidate(id: id, origin: .claude, why: p.why, evidence: checked.evidence, steps: p.steps, noticedAt: now, repeatTitle: p.repeatTitle)
+                let tap = Tap(candidate: cand, verdict: Verdict(title: p.title, body: p.body, actionLabel: p.actionLabel, confidence: p.confidence), createdAt: now)
+                try? store.upsert(tap)
+                r.taps.append(tap)
+                claimed.formUnion(checked.targets)
+            }
         }
+        if !rejected.isEmpty { log["rejected"] = rejected }
         return r
     }
 
@@ -143,7 +152,7 @@ public actor Engine {
             }
             tap.state = .done
             tap.note = lines.filter { !$0.isEmpty }.joined(separator: " · ")
-            if (try? Skills.learn(from: tap, store: store, now: env.now())) ?? nil != nil { tap.note! += " · Learned: next time this runs on your Mac" }
+            if (try? Skills.learn(from: tap, store: store, now: env.now())) ?? nil != nil { tap.note! += " · Learned" }
         } catch {
             tap.state = lines.isEmpty ? .failed : .done
             tap.note = (lines + [(error as? ToolError)?.message ?? "\(error)"]).joined(separator: " · ")

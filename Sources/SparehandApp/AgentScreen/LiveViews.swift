@@ -16,7 +16,7 @@ struct LivePanelView: View {
     private var header: some View {
         HStack(spacing: 10) {
             Circle().fill(viewer.needsYou ? Theme.decide : Theme.working).frame(width: 8, height: 8)
-            Text(viewer.needsYou ? "Sparehand needs you" : "Sparehand is working on its own screen")
+            Text(viewer.needsYou ? "Sparehand needs you" : viewer.finished ? "Done on Sparehand's screen" : "Sparehand is working on its own screen")
                 .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
             Spacer()
             if let i = viewer.steps.firstIndex(where: { $0.state == .current }) {
@@ -27,7 +27,7 @@ struct LivePanelView: View {
 
     private var stepsList: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(viewer.steps) { step in
+            ForEach(viewer.steps.count > 1 ? viewer.steps : []) { step in
                 HStack(spacing: 8) {
                     switch step.state {
                     case .done: Text("✓").foregroundStyle(Theme.working)
@@ -39,11 +39,30 @@ struct LivePanelView: View {
                         .foregroundStyle(step.state == .current ? Theme.ink : Theme.muted)
                 }
             }
-            Text(viewer.status).font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(2)
+            if !viewer.log.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(viewer.log.suffix(viewer.finished ? 0 : 1).enumerated()), id: \.offset) { _, line in
+                        Text(line).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Theme.body).lineLimit(1).truncationMode(.middle)
+                    }
+                }
+            }
+            Text(viewer.status).font(.system(size: 12)).foregroundStyle(viewer.finished ? Theme.ink : Theme.muted).lineLimit(1)
         }
     }
 
-    private func buttons(full: Bool) -> some View {
+    @ViewBuilder private func buttons(full: Bool) -> some View {
+        if viewer.finished {
+            HStack(spacing: 8) {
+                Button("Show me") { viewer.onReveal?() }.buttonStyle(PillButton(fill: Theme.decide, text: .white))
+                Spacer()
+                Button("Close") { viewer.onClose?() }.buttonStyle(PillButton(fill: .white, text: Theme.ink, border: Theme.hairline))
+            }
+        } else {
+            working(full: full)
+        }
+    }
+
+    private func working(full: Bool) -> some View {
         HStack(spacing: 8) {
             if !full {
                 Button { viewer.watchFullScreen() } label: {

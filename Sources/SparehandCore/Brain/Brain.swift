@@ -172,7 +172,7 @@ public enum Gate {
     public static func system(memory: [String]) -> String {
         """
         You are the noticing step of Sparehand, a proactive assistant on the user's Mac. You see a snapshot of what the Mac's sensors observed.
-        Decide if there is ONE concrete, helpful thing to offer that the user would very likely approve right now, and plan it with the tools below.
+        Decide what, if anything, is worth offering right now: up to 3 separate, concrete things the user would very likely approve, best first, each planned with the tools below. Often the right answer is none or one.
         Offer when: something is wasting space or resources, something is waiting on the user, a repeated manual routine could be one tap, \
         an upcoming moment needs preparing, scattered work could be pulled together, \
         or a work session is ending and open work could be saved and put away so it is easy to pick up later.
@@ -186,11 +186,11 @@ public enum Gate {
         What you know about this user:
         \(memory.isEmpty ? "- nothing yet" : memory.map { "- " + $0 }.joined(separator: "\n"))
 
-        Answer ONLY JSON:
-        {"propose": true|false, "steps": [{"tool": "...", "args": {...}}], "card_title": "<=8 words", \
-        "card_body": "<=30 words: exactly what will happen", "why_noticed": "<=20 words: what in the snapshot made you notice", \
-        "action_label": "<=3 words", "repeat_title": "<=8 words, the title to use if this comes back, with {count} for the number of new items", \
-        "confidence": 1-5}
+        Answer ONLY JSON, with an empty list when nothing is worth offering:
+        {"offers": [{"steps": [{"tool": "...", "args": {...}}], "card_title": "<=6 words", \
+        "card_body": "<=14 words: exactly what will happen, plain words", "why_noticed": "<=10 words: the fact you noticed", \
+        "action_label": "<=2 words", "repeat_title": "<=6 words, the title to use if this comes back, with {count} for the number of new items", \
+        "confidence": 1-5}]}
         """
     }
 
@@ -198,17 +198,24 @@ public enum Gate {
         "Earlier offers today: \(earlier.isEmpty ? "none" : earlier.joined(separator: "; "))\nSnapshot:\n" + snapshot.text
     }
 
-    /// nil when Claude stays silent or the answer can't be read.
-    public static func parse(_ text: String) -> Proposal? {
-        guard let v = firstJSONObject(text), v["propose"]?.bool == true else { return nil }
-        let steps = (v["steps"]?.array ?? []).compactMap { s -> ToolCall? in
-            guard let t = s["tool"]?.string else { return nil }
-            return ToolCall(tool: t, args: s["args"] ?? .object([:]))
+    /// Claude's offers, best first (at most 3). Empty when it stays silent or the answer can't be read.
+    public static func parseAll(_ text: String) -> [Proposal] {
+        guard let v = firstJSONObject(text) else { return [] }
+        let items: [JSONValue] = v["offers"]?.array ?? (v["propose"]?.bool == true ? [v] : [])
+        return items.prefix(3).compactMap { o in
+            let steps = (o["steps"]?.array ?? []).compactMap { s -> ToolCall? in
+                guard let t = s["tool"]?.string else { return nil }
+                return ToolCall(tool: t, args: s["args"] ?? .object([:]))
+            }
+            guard !steps.isEmpty else { return nil }
+            return Proposal(steps: steps, title: o["card_title"]?.string ?? "", body: o["card_body"]?.string ?? "",
+                            why: o["why_noticed"]?.string ?? "", actionLabel: o["action_label"]?.string ?? "Do it",
+                            repeatTitle: o["repeat_title"]?.string, confidence: Int(o["confidence"]?.number ?? 0))
         }
-        return Proposal(steps: steps, title: v["card_title"]?.string ?? "", body: v["card_body"]?.string ?? "",
-                        why: v["why_noticed"]?.string ?? "", actionLabel: v["action_label"]?.string ?? "Do it",
-                        repeatTitle: v["repeat_title"]?.string, confidence: Int(v["confidence"]?.number ?? 0))
     }
+
+    /// The best offer, or nil.
+    public static func parse(_ text: String) -> Proposal? { parseAll(text).first }
 }
 
 // MARK: - Validation: nothing invented gets through
@@ -323,7 +330,7 @@ public enum Skills {
             guard files.count >= skill.minCount else { return nil }
             let n = "\(files.count)"
             let id = Fingerprint.make("skill:" + skill.id, files.map(\.lastPathComponent))
-            return Candidate(id: id, origin: .skill, why: "You approved this before, and \(n) new matching files are back in \(sel.folder).",
+            return Candidate(id: id, origin: .skill, why: "Same as last time · \(n) new in \(sel.folder)",
                              evidence: [EvidenceItem(label: "\(n) files in \(sel.folder)", detail: files.first?.lastPathComponent ?? "")],
                              steps: skill.steps, noticedAt: now, skillID: skill.id,
                              repeatTitle: skill.titleTemplate.replacingOccurrences(of: "{count}", with: n))

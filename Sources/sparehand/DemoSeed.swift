@@ -38,9 +38,10 @@ enum DemoSeed {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd 'at' h.mm.ss"
         let ampm = DateFormatter(); ampm.dateFormat = "a"
         var made = 0
+        let seedShift = Int(Date().timeIntervalSince1970) % 5000
         for i in 0..<count {
             let s = screens[i % screens.count]
-            let date = Date().addingTimeInterval(-Double(i) * 86_400 * 3.7 - Double(i * 1931 % 7200))
+            let date = Date().addingTimeInterval(-Double(i + 2) * 86_400 * 3.1 - Double((i * 1931 + seedShift) % 7200))
             let name = "Screenshot \(f.string(from: date))\u{202F}\(ampm.string(from: date)).png"
             let url = desk.appendingPathComponent(name)
             guard let png = render(s.app, s.lines) else { continue }
