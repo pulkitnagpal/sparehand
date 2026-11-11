@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Where watchers look and what they can use. Tests point `home` at a temp folder.
@@ -6,6 +7,8 @@ public struct Environment: Sendable {
     public var now: @Sendable () -> Date
     public var store: Store
     public var scripts: ScriptRunner
+    /// Names of running apps (used to ask only running browsers for tabs).
+    public var runningApps: @Sendable () -> Set<String> = { [] }
 
     public init(home: URL, now: @escaping @Sendable () -> Date = { Date() }, store: Store, scripts: ScriptRunner) {
         self.home = home; self.now = now; self.store = store; self.scripts = scripts
@@ -27,7 +30,9 @@ public struct Environment: Sendable {
     }
 
     public static func live(store: Store) -> Environment {
-        Environment(home: liveHome, store: store, scripts: OSAScriptRunner())
+        var e = Environment(home: liveHome, store: store, scripts: OSAScriptRunner())
+        e.runningApps = { Set(NSWorkspace.shared.runningApplications.compactMap(\.localizedName)) }
+        return e
     }
 }
 
