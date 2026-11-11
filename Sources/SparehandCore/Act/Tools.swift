@@ -132,7 +132,7 @@ public enum Tools {
                 let folder = (try? await local.classify(text: text, into: folders + ["Other"])) ?? "Other"
                 _ = try mover.perform([FileMove(from: f, to: into.appendingPathComponent(folder).appendingPathComponent(f.lastPathComponent))], tapID: tapID)
                 counts[folder, default: 0] += 1
-                ctx.progress("\(i + 1) of \(files.count) → \(folder)")
+                ctx.progress("Sorted \(i + 1) of \(files.count) · \(folder)")
             }
             try addUndo(UndoRecord(kind: "moves"), tapID: tapID, store: env.store)
             return "Sorted \(files.count) into \(counts.count) folders"
@@ -146,6 +146,7 @@ public enum Tools {
                 let d = (try? u.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? env.now()
                 return FileMove(from: u, to: into.appendingPathComponent(f.string(from: d)).appendingPathComponent(u.lastPathComponent))
             }
+            ctx.progress("Moving \(moves.count) files")
             let r = try FileMover(store: env.store).perform(moves, tapID: tapID)
             try addUndo(UndoRecord(kind: "moves"), tapID: tapID, store: env.store)
             return "Moved \(r.moved.count) into monthly folders"
@@ -155,13 +156,15 @@ public enum Tools {
             let files = sel.resolve(home: env.home, now: env.now())
             guard !files.isEmpty else { throw ToolError.nothingToDo("Those files are no longer there.") }
             var n = 0
-            for u in files {
+            let freed = Validator.size(files)
+            for (i, u) in files.enumerated() {
+                ctx.progress("Moving \(i + 1) of \(files.count) to the Bin")
                 var result: NSURL?
                 do { try FileManager.default.trashItem(at: u, resultingItemURL: &result) } catch { continue }
                 if let r = result as URL? { try env.store.appendJournal(JournalEntry(tapID: tapID, move: FileMove(from: u, to: r), at: env.now())); n += 1 }
             }
             try addUndo(UndoRecord(kind: "moves"), tapID: tapID, store: env.store)
-            return "Moved \(n) to the Bin"
+            return n == files.count ? "Freed \(freed) · \(n) in the Bin" : "Moved \(n) of \(files.count) to the Bin"
 
         case "quit_app":
             guard let name = a["name"]?.string,
@@ -174,6 +177,7 @@ public enum Tools {
         case "stop_container":
             let names = a["names"]?.strings ?? []
             guard !names.isEmpty, let docker = Shell.which("docker") else { throw ToolError.nothingToDo("No containers to stop.") }
+            ctx.progress("Stopping " + names.joined(separator: ", "))
             _ = Shell.run(docker, ["stop"] + names, timeout: 60)
             try addUndo(UndoRecord(kind: "start_containers", values: names), tapID: tapID, store: env.store)
             return "Stopped " + names.joined(separator: ", ")
@@ -182,6 +186,7 @@ public enum Tools {
             let wanted = Set((a["urls"]?.strings ?? []).map(Redactor.url))
             let tabs = await BrowserTabs.all(runner: env.scripts, running: env.runningApps()).filter { wanted.contains(Redactor.url($0.url.absoluteString)) }
             guard !tabs.isEmpty else { throw ToolError.nothingToDo("Those tabs are already closed.") }
+            ctx.progress("Closing \(tabs.count) tabs")
             for (browser, group) in Dictionary(grouping: tabs, by: \.browser) {
                 _ = try await env.scripts.run(BrowserTabs.closeScript(app: browser, urls: group.map(\.url.absoluteString)))
                 try addUndo(UndoRecord(kind: "reopen_tabs", values: group.map(\.url.absoluteString), extra: browser), tapID: tapID, store: env.store)
@@ -191,6 +196,7 @@ public enum Tools {
         case "create_note":
             let title = a["title"]?.string ?? "Sparehand note"
             let html = ClaudeJob.sanitize(a["html"]?.string ?? "")
+            ctx.progress("Writing the note")
             let id = try await NotesWriter(runner: env.scripts).create(title: title, html: html)
             try addUndo(UndoRecord(kind: "delete_note", values: [id]), tapID: tapID, store: env.store)
             return "Created the note “\(title)”"

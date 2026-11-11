@@ -96,11 +96,17 @@ final class AppModel: ObservableObject {
     }
 
     func approve(_ tap: Tap) {
-        tapPanel.remove(tap.id)
+        tapPanel.set(tap, .working(tap.candidate.steps.contains { WatchableRun.fileTools.contains($0.tool) } ? "Starting on Sparehand's screen…" : "Starting…"))
         busyTapID = tap.id
         Task {
-            _ = await runner.run(tap)
+            let result = await runner.run(tap) { [weak self] line in self?.tapPanel.set(tap, .working(line)) }
             busyTapID = nil
+            if let r = result {
+                tapPanel.set(r, r.state == .failed ? .failed(r.note ?? "Something went wrong.") : .done(r.note ?? "Done"))
+            } else {
+                tapPanel.set(tap, .failed("That suggestion no longer exists."))
+            }
+            tapPanel.removeLater(tap.id, after: 10)
             await refreshFeed()
         }
     }
@@ -111,12 +117,19 @@ final class AppModel: ObservableObject {
     }
 
     func never(_ tap: Tap) {
-        tapPanel.remove(tap.id)
+        tapPanel.set(tap, .undone("Won't offer this again."))
+        tapPanel.removeLater(tap.id, after: 3)
         Task { await engine.never(tap.id); await refreshFeed() }
     }
 
     func undo(_ tap: Tap) {
-        Task { _ = await engine.undo(tap.id); await refreshFeed() }
+        tapPanel.set(tap, .working("Putting it back…"))
+        Task {
+            let r = await engine.undo(tap.id)
+            tapPanel.set(r ?? tap, r?.state == .undone ? .undone(r?.note ?? "Put back") : .failed(r?.note ?? "Couldn't undo."))
+            tapPanel.removeLater(tap.id, after: 6)
+            await refreshFeed()
+        }
     }
 
     // MARK: - Local model

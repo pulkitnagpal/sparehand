@@ -13,10 +13,10 @@ final class WatchableRun {
 
     func say(_ s: String) { print("[watch] " + s) }
 
-    func run(_ tap: Tap) async -> Tap? {
+    func run(_ tap: Tap, progress: @escaping @MainActor (String) -> Void) async -> Tap? {
         let fileStep = tap.candidate.steps.first { Self.fileTools.contains($0.tool) }
         let noteStep = tap.candidate.steps.contains { $0.tool == "create_note" }
-        guard fileStep != nil || noteStep else { say("no watchable step; running directly"); return await model.engine.approve(tap.id) }
+        guard fileStep != nil || noteStep else { say("no watchable step; running directly"); return await model.engine.approve(tap.id) { line in Task { @MainActor in progress(line) } } }
 
         let screen = model.screen
         let viewer = LiveViewer(screen: screen)
@@ -58,6 +58,7 @@ final class WatchableRun {
             let result = await model.engine.approve(tap.id) { line in
                 Task { @MainActor in
                     viewer.status = line
+                    progress(line)
                 }
             }
             say(String(format: "plan finished in %.1fs: %@", Date().timeIntervalSince(started), result?.note ?? "-"))

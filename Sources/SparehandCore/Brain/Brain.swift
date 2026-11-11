@@ -231,7 +231,7 @@ public enum Validator {
         public var measured: String?
     }
 
-    static func size(_ files: [URL]) -> String {
+    public static func size(_ files: [URL]) -> String {
         let bytes = files.reduce(0) { $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
         return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
