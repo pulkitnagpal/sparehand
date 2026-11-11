@@ -1,0 +1,6 @@
+{"type":"system","subtype":"init","session_id":"s1","tools":["WebFetch"],"model":"claude-sonnet-5-5"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I'll read each page and compare the desks."}]},"session_id":"s1"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"WebFetch","input":{"url":"https://www.nytimes.com/wirecutter/reviews/best-standing-desks/","prompt":"List desks"}}]},"session_id":"s1"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"..."}]},"session_id":"s1"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t2","name":"WebFetch","input":{"url":"https://www.upliftdesk.com/uplift-v2-standing-desk/","prompt":"Price and warranty"}}]},"session_id":"s1"}
+{"type":"result","subtype":"success","is_error":false,"result":"Here you go:\n<table><tr><th>Desk</th><th>Price</th></tr><tr><td><a href=\"https://www.upliftdesk.com/uplift-v2-standing-desk/\">Uplift V2</a></td><td>$599</td></tr></table>","session_id":"s1"}
