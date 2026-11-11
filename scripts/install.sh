@@ -6,7 +6,10 @@ HERE="${0:A:h}"
 if [[ -d "$HERE/Sparehand.app" ]]; then SRC="$HERE/Sparehand.app"
 else cd "$HERE/.."; ./scripts/bundle-app.sh; SRC="$PWD/dist/Sparehand.app"; fi
 command -v uv >/dev/null || { echo "Sparehand needs uv for its on-device model: brew install uv"; exit 1; }
-command -v claude >/dev/null || echo "Note: research notes use Claude Code when you connect with a subscription token. With an API key nothing else is needed."
+if ! command -v claude >/dev/null && [[ -x "$HERE/bin/claude" ]]; then   # a kit can carry Claude Code along
+  mkdir -p ~/.local/bin && ln -sf "$HERE/bin/claude" ~/.local/bin/claude
+fi
+command -v claude >/dev/null || [[ -x ~/.local/bin/claude ]] || echo "Note: research notes use Claude Code when you connect with a subscription token. With an API key nothing else is needed."
 mkdir -p ~/Applications
 rm -rf ~/Applications/Sparehand.app
 cp -R "$SRC" ~/Applications/
