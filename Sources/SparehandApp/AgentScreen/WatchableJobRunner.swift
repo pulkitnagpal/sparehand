@@ -21,7 +21,7 @@ final class WatchableRun {
         let screen = model.screen
         let viewer = LiveViewer(screen: screen)
         let scripts = OSAScriptRunner(timeout: 15)
-        var finderWindow: String?
+        var finderWindows: [String] = []
         var dest: URL?
         do {
             let bounds = try await screen.start()
@@ -33,23 +33,31 @@ final class WatchableRun {
                 let d = Tools.folderURL(step.args["into"]?.string ?? "~/Pictures/Screenshots", home: model.env.home)!
                 dest = d
                 try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
-                do { finderWindow = try await scripts.run(Self.finderOpen(d, area)).trimmingCharacters(in: .whitespacesAndNewlines) }
-                catch { say("Finder window failed: \(error)") }
-                say("Finder window \(finderWindow ?? "none") for \(d.lastPathComponent)")
-                var cg: CGWindowID?
-                for _ in 0..<20 where cg == nil {
-                    try await Task.sleep(for: .milliseconds(150))
-                    cg = WindowFinder.windowID(owner: "Finder", title: d.lastPathComponent, inside: bounds)
+                let source = FileSelector(step.args["files"]).flatMap { Tools.folderURL($0.folder, home: model.env.home) }
+                let half = (area.width - 24) / 2
+                let left = CGRect(x: area.minX, y: area.minY, width: half, height: area.height)
+                let right = CGRect(x: area.minX + half + 24, y: area.minY, width: half, height: area.height)
+                var ids: [CGWindowID] = []
+                for (dir, rect) in [(source, left), (d, right)] {
+                    guard let dir else { continue }
+                    do {
+                        let w = try await scripts.run(Self.finderOpen(dir, rect)).trimmingCharacters(in: .whitespacesAndNewlines)
+                        finderWindows.append(w)
+                    } catch { say("Finder window for \(dir.lastPathComponent) failed: \(error)") }
+                    var cg: CGWindowID?
+                    for _ in 0..<20 where cg == nil {
+                        try await Task.sleep(for: .milliseconds(150))
+                        cg = WindowFinder.windowID(owner: "Finder", title: dir.lastPathComponent, inside: bounds)
+                    }
+                    say("Finder \(dir.lastPathComponent): \(cg.map(String.init) ?? "not found")")
+                    if let cg { ids.append(cg) }
                 }
-                say("Finder CG window: \(cg.map(String.init) ?? "not found")")
-                if let cg { try await viewer.start(windowIDs: [cg]); say("viewer streaming") }
+                if !ids.isEmpty { try await viewer.start(windowIDs: ids); say("viewer streaming \(ids.count) windows") }
             }
             let started = Date()
             let result = await model.engine.approve(tap.id) { line in
                 Task { @MainActor in
                     viewer.status = line
-                    viewer.log.append(line)
-                    if let i = line.range(of: " of ") { _ = i; viewer.advance(to: 0) }
                 }
             }
             say(String(format: "plan finished in %.1fs: %@", Date().timeIntervalSince(started), result?.note ?? "-"))
@@ -71,7 +79,7 @@ final class WatchableRun {
             viewer.needsYou = result?.state == .failed
             viewer.status = result?.note ?? "Done."
             await waitForClose(viewer, reveal: dest)
-            if let w = finderWindow, !w.isEmpty { _ = try? await scripts.run("tell application \"Finder\" to close window id \(w)") }
+            for w in finderWindows where !w.isEmpty { _ = try? await scripts.run("tell application \"Finder\" to close window id \(w)") }
             await viewer.stop()
             screen.stop()
             return result
@@ -117,7 +125,7 @@ final class WatchableRun {
         tell application "Finder"
           set w to make new Finder window to (POSIX file \(AppleScriptText.quoted(dir.path)) as alias)
           set current view of w to icon view
-          set bounds of w to \(TerminalLauncher.bounds(rect.insetBy(dx: 160, dy: 40)))
+          set bounds of w to \(TerminalLauncher.bounds(rect))
           return id of w
         end tell
         """

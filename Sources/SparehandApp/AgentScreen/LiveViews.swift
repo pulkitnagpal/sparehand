@@ -19,7 +19,7 @@ struct LivePanelView: View {
             Text(viewer.needsYou ? "Sparehand needs you" : viewer.finished ? "Done on Sparehand's screen" : "Sparehand is working on its own screen")
                 .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
             Spacer()
-            if let i = viewer.steps.firstIndex(where: { $0.state == .current }) {
+            if viewer.steps.count > 1, let i = viewer.steps.firstIndex(where: { $0.state == .current }) {
                 Text("Step \(i + 1) of \(viewer.steps.count)").font(.system(size: 12)).foregroundStyle(Theme.muted)
             }
         }

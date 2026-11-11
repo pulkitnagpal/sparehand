@@ -99,8 +99,9 @@ final class LiveViewer: ObservableObject {
         try? await stream?.stopCapture()
         stream = nil
         output = nil
+        fullObservers.forEach(NotificationCenter.default.removeObserver); fullObservers = []
         panel?.close(); panel = nil
-        fullWindow?.close(); fullWindow = nil
+        if let w = fullWindow { fullWindow = nil; if w.styleMask.contains(.fullScreen) { w.toggleFullScreen(nil) }; w.close() }
     }
 
     private func makeFilter() async throws -> SCContentFilter {
@@ -144,10 +145,30 @@ final class LiveViewer: ObservableObject {
             w.contentView = NSHostingView(rootView: LivePanelView(viewer: self, compact: false))
             fullWindow = w
         }
+        // Full screen replaces the small panel; leaving full screen brings the panel back.
+        panel?.orderOut(nil)
+        if let w = fullWindow, fullObservers.isEmpty {
+            for name in [NSWindow.didExitFullScreenNotification, NSWindow.willCloseNotification] {
+                fullObservers.append(NotificationCenter.default.addObserver(forName: name, object: w, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.leaveFullScreen() }
+                })
+            }
+        }
         fullWindow?.center()
         fullWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate()
         fullWindow?.toggleFullScreen(nil)
+    }
+
+    private var fullObservers: [NSObjectProtocol] = []
+
+    private func leaveFullScreen() {
+        fullObservers.forEach(NotificationCenter.default.removeObserver)
+        fullObservers = []
+        let w = fullWindow
+        fullWindow = nil
+        w?.orderOut(nil)
+        panel?.orderFrontRegardless()
     }
 }
 

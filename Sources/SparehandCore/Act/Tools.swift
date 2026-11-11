@@ -210,7 +210,7 @@ public enum Tools {
             switch r.kind {
             case "moves":
                 let rep = try FileMover(store: env.store).undo(tapID: tapID)
-                if !rep.moved.isEmpty { notes.append("Put \(rep.moved.count) files back") }
+                if !rep.moved.isEmpty { notes.append("Put \(rep.moved.count) \(rep.moved.count == 1 ? "file" : "files") back") }
             case "reopen_tabs":
                 let urls = r.values.compactMap(URL.init(string:))
                 if let app = r.extra, let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: BrowserTabs.bundleID(app) ?? "") {
