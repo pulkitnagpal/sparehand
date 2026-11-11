@@ -15,6 +15,7 @@ running() { [[ -f "$PID" ]] && kill -0 "$(cat "$PID")" 2>/dev/null; }
 case "${1:-status}" in
   start)
     if running; then echo "running (pid $(cat "$PID"))"; exit 0; fi
+    if curl -s -o /dev/null "http://127.0.0.1:$PORT/v1/models"; then echo "already answering on port $PORT"; exit 0; fi
     if [[ ! -x "$VENV/bin/mlx_lm.server" ]]; then
       command -v uv >/dev/null || { echo "uv is required: brew install uv" >&2; exit 1; }
       uv venv -q "$VENV" --python 3.12

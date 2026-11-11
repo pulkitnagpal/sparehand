@@ -31,6 +31,7 @@ public enum JudgePrompt {
         unblocking something that is waiting on them, preventing an embarrassment, or saving repeated manual work.
         Do NOT show a card when nothing is wrong, the thing is in active use, or the action would get in the way.
         Being busy is not a reason to stay quiet: cards are quiet and can be read later.
+        Describe ONLY the proposed action given below. Never say anything will be deleted, trashed or binned unless the proposed action deletes.
         Answer ONLY JSON: {"show": true|false, "value": 1-5, "title": "<=8 words", "body": "<=24 words", "action": "<=3 words"}
 
         Examples:
@@ -45,7 +46,7 @@ public enum JudgePrompt {
             lines.append("Details: " + c.evidence.map { "\($0.label) (\($0.detail))" }.joined(separator: "; "))
         }
         switch c.plan {
-        case .moveFiles: lines.append("Proposed action: move the files; undo is possible.")
+        case .moveFiles: lines.append("Proposed action: move them into Pictures › Screenshots, one folder per month; nothing is deleted and undo is possible.")
         case .deletePermanently: lines.append("Proposed action: delete these items permanently; this cannot be undone.")
         case .tabsToNote(let topic, _): lines.append("Proposed action: turn the tabs about \(topic) into one comparison table in Notes.")
         }
@@ -87,7 +88,17 @@ public struct LocalModelJudge: Sendable {
         let text = (obj["body"] as? String ?? "").trimmingCharacters(in: .whitespaces)
         let action = (obj["action"] as? String ?? "").trimmingCharacters(in: .whitespaces)
         if show && (title.isEmpty || text.isEmpty || action.isEmpty) { throw JudgeError.unparseable }
+        if show && Self.contradicts(c.plan, title + " " + text + " " + action) { throw JudgeError.unparseable }
         return Verdict(show: show, value: (obj["value"] as? Int) ?? 3, title: title, body: text, actionLabel: action, source: .model)
+    }
+}
+
+extension LocalModelJudge {
+    /// Card copy that claims a deletion the plan doesn't make is never shown (a 4B model did write "to trash").
+    static func contradicts(_ plan: ActionPlan, _ copy: String) -> Bool {
+        guard plan.isReversible else { return false }
+        let words = copy.lowercased()
+        return ["trash", "bin", "delete", "erase", "remove permanently"].contains { words.contains($0) }
     }
 }
 

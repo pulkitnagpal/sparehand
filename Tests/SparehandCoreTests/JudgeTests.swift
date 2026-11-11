@@ -63,6 +63,18 @@ let tabsCandidate = Candidate(id: "c3", watcher: .tabs, summary: "7 open tabs ab
         #expect(messages.last?["content"]?.contains("Standing Desks") == true)
     }
 
+    @Test func rejectsCopyThatContradictsPlan() async {
+        // Seen live: the model said screenshots would go "to trash" when the plan only moves them into folders.
+        let t = FakeTransport.content(#"{"show": true, "value": 4, "title": "25 old screenshots on Desktop", "body": "Move 25 screenshots to trash to free space.", "action": "Move"}"#)
+        let v = await FallbackJudge(primary: LocalModelJudge(transport: t)).verdict(for: screenshotCandidate)
+        #expect(v.source == .rules)
+    }
+
+    @Test func promptStatesWhereFilesGo() {
+        let u = JudgePrompt.user(screenshotCandidate)
+        #expect(u.contains("Pictures › Screenshots") && u.contains("nothing is deleted"))
+    }
+
     @Test func ruleCopyPerWatcher() async {
         let r = RuleJudge()
         let s = await r.verdict(for: screenshotCandidate)

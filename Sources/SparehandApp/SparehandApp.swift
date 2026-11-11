@@ -1,17 +1,60 @@
 import AppKit
+import SwiftUI
 
 @main
 enum SparehandMain {
     @MainActor static func main() {
         setvbuf(stdout, nil, _IONBF, 0)
-        let app = NSApplication.shared
         if CommandLine.arguments.contains("--agent-screen-selftest") {
+            let app = NSApplication.shared
             let test = AgentScreenSelfTest()
             app.delegate = test
             app.setActivationPolicy(.accessory)
             app.run()
             return
         }
-        print("Sparehand: the menu-bar app arrives in Task 12.")
+        SparehandApp.main()
+    }
+}
+
+struct SparehandApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
+
+    var body: some Scene {
+        MenuBarExtra {
+            FeedView(model: delegate.model, openOnboarding: { delegate.showOnboarding() })
+        } label: {
+            Image(systemName: "hand.raised")
+        }
+        .menuBarExtraStyle(.window)
+    }
+}
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    let model = AppModel()
+    private var onboarding: NSWindow?
+
+    func applicationDidFinishLaunching(_ n: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        model.start()
+        if (try? model.store.setting("onboarded")) ?? nil == nil { showOnboarding() }
+    }
+
+    func showOnboarding() {
+        if onboarding == nil {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 640), styleMask: [.titled, .closable],
+                             backing: .buffered, defer: false)
+            w.title = "Welcome to Sparehand"
+            w.isReleasedWhenClosed = false
+            w.contentView = NSHostingView(rootView: OnboardingView(model: model) { [weak self] in
+                try? self?.model.store.setSetting("onboarded", "1")
+                self?.onboarding?.close()
+            })
+            onboarding = w
+        }
+        onboarding?.center()
+        onboarding?.makeKeyAndOrderFront(nil)
+        NSApp.activate()
     }
 }
