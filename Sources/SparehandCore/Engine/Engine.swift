@@ -66,6 +66,7 @@ public actor Engine {
                                                                         actionLabel: "x", repeatTitle: nil, confidence: 5), snapshot: snap, env: env) else { continue }
             var cand = c
             cand.evidence = checked.evidence
+            cand.benefit = checked.measured
             let skill = Skills.all(store).first { $0.id == c.skillID }
             let tap = Tap(candidate: cand, verdict: Verdict(title: c.repeatTitle ?? "Same as last time", body: skill?.body ?? "",
                                                             actionLabel: skill?.actionLabel ?? "Do it", confidence: 5), createdAt: now)
@@ -117,7 +118,8 @@ public actor Engine {
                 if !claimed.isDisjoint(with: checked.targets) { r.steps.append("  skipped: overlaps another card"); continue }
                 let id = Fingerprint.make(p.steps.map(\.tool).joined(separator: "+"), checked.targets)
                 guard isNew(id, now: now) else { r.steps.append("  already offered"); continue }
-                let cand = Candidate(id: id, origin: .claude, why: p.why, evidence: checked.evidence, steps: p.steps, noticedAt: now, repeatTitle: p.repeatTitle)
+                var cand = Candidate(id: id, origin: .claude, why: p.why, evidence: checked.evidence, steps: p.steps, noticedAt: now, repeatTitle: p.repeatTitle)
+                cand.benefit = checked.measured ?? p.benefit
                 let tap = Tap(candidate: cand, verdict: Verdict(title: p.title, body: p.body, actionLabel: p.actionLabel, confidence: p.confidence), createdAt: now)
                 try? store.upsert(tap)
                 r.taps.append(tap)

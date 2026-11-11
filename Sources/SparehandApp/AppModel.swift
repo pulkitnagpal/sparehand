@@ -84,7 +84,9 @@ final class AppModel: ObservableObject {
         let r = await engine.look(force: force)
         lastLook = r.steps
         await refreshFeed()
-        if !r.taps.isEmpty { tapPanel.show(r.taps) }
+        // "Look now" also brings back cards that are still waiting.
+        let waiting = force ? pending.filter { p in !r.taps.contains { $0.id == p.id } } : []
+        if !(r.taps + waiting).isEmpty { tapPanel.show(r.taps + waiting) }
     }
 
     func refreshFeed() async {

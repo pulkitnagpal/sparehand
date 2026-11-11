@@ -39,6 +39,8 @@ public struct Candidate: Codable, Sendable, Equatable, Identifiable {
     public var skillID: String?
     /// The card title to use when this offer repeats, with "{count}" for the new item count.
     public var repeatTitle: String?
+    /// What the user gains, in a few words ("Frees 6.2 GB"). Measured by code when it can be.
+    public var benefit: String?
 
     public init(id: String, origin: Origin, why: String, evidence: [EvidenceItem] = [], steps: [ToolCall], noticedAt: Date,
                 skillID: String? = nil, repeatTitle: String? = nil) {

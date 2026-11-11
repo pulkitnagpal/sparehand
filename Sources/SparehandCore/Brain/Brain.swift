@@ -166,6 +166,7 @@ public struct Proposal: Sendable, Equatable {
     public var actionLabel: String
     public var repeatTitle: String?
     public var confidence: Int
+    public var benefit: String? = nil
 }
 
 public enum Gate {
@@ -188,6 +189,7 @@ public enum Gate {
 
         Answer ONLY JSON, with an empty list when nothing is worth offering:
         {"offers": [{"steps": [{"tool": "...", "args": {...}}], "card_title": "<=6 words", \
+        "benefit": "<=6 words: what the user gains, concrete, only numbers from the snapshot", \
         "card_body": "<=14 words: exactly what will happen, plain words", "why_noticed": "<=10 words: the fact you noticed", \
         "action_label": "<=2 words", "repeat_title": "<=6 words, the title to use if this comes back, with {count} for the number of new items", \
         "confidence": 1-5}]}
@@ -210,7 +212,8 @@ public enum Gate {
             guard !steps.isEmpty else { return nil }
             return Proposal(steps: steps, title: o["card_title"]?.string ?? "", body: o["card_body"]?.string ?? "",
                             why: o["why_noticed"]?.string ?? "", actionLabel: o["action_label"]?.string ?? "Do it",
-                            repeatTitle: o["repeat_title"]?.string, confidence: Int(o["confidence"]?.number ?? 0))
+                            repeatTitle: o["repeat_title"]?.string, confidence: Int(o["confidence"]?.number ?? 0),
+                            benefit: o["benefit"]?.string)
         }
     }
 
@@ -221,7 +224,17 @@ public enum Gate {
 // MARK: - Validation: nothing invented gets through
 
 public enum Validator {
-    public struct Checked: Sendable { public var targets: [String]; public var evidence: [EvidenceItem] }
+    public struct Checked: Sendable {
+        public var targets: [String]
+        public var evidence: [EvidenceItem]
+        /// A benefit code measured itself ("Frees 6.2 GB"), preferred over the model's words.
+        public var measured: String?
+    }
+
+    static func size(_ files: [URL]) -> String {
+        let bytes = files.reduce(0) { $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
+        return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
 
     public static func check(_ p: Proposal, snapshot: Snapshot, env: Environment) -> Result<Checked, ValidationFailure> {
         guard (1...5).contains(p.steps.count) else { return .failure(.init("no steps")) }
@@ -232,7 +245,7 @@ public enum Validator {
         let binning = p.steps.contains { $0.tool == "move_to_bin" }
         if !binning, ["delete", "trash", " bin"].contains(where: copy.contains) { return .failure(.init("copy says delete but the plan doesn't")) }
 
-        var targets: [String] = [], evidence: [EvidenceItem] = []
+        var targets: [String] = [], evidence: [EvidenceItem] = [], measured: String?
         let snapTabs = Set(snapshot.tabs.map { Redactor.url($0.url.absoluteString) })
         for s in p.steps {
             guard Tools.spec(s.tool) != nil else { return .failure(.init("unknown tool \(s.tool)")) }
@@ -246,12 +259,14 @@ public enum Validator {
                 }
                 if s.tool == "sort_by_content", (s.args["folders"]?.strings ?? []).isEmpty { return .failure(.init("sort_by_content: no folders")) }
                 targets += files.map(\.lastPathComponent)
-                evidence.append(EvidenceItem(label: "\(files.count) files in \(sel.folder)", detail: files.first.map(\.lastPathComponent) ?? ""))
+                evidence += files.prefix(3).map { EvidenceItem(label: $0.lastPathComponent, detail: sel.folder) }
+                measured = measured ?? (s.tool == "move_to_bin" ? "Frees \(size(files))" : "\(files.count) files off your \(sel.folder)")
             case "close_tabs":
                 let urls = s.args["urls"]?.strings.map(Redactor.url) ?? []
                 guard !urls.isEmpty, urls.allSatisfy(snapTabs.contains) else { return .failure(.init("close_tabs: tab not open")) }
                 targets += urls
-                evidence.append(EvidenceItem(label: "\(urls.count) tabs", detail: urls.first ?? ""))
+                evidence += snapshot.tabs.filter { urls.contains(Redactor.url($0.url.absoluteString)) }.prefix(3).map { EvidenceItem(label: $0.title, detail: $0.browser) }
+                measured = measured ?? "\(urls.count) fewer tabs open"
             case "stop_container":
                 let names = s.args["names"]?.strings ?? []
                 guard !names.isEmpty, names.allSatisfy(snapshot.containers.contains) else { return .failure(.init("stop_container: not running")) }
@@ -266,7 +281,7 @@ public enum Validator {
                 targets.append(s.tool)
             }
         }
-        return .success(Checked(targets: targets, evidence: evidence))
+        return .success(Checked(targets: targets, evidence: evidence, measured: measured))
     }
 }
 

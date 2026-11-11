@@ -47,9 +47,9 @@ struct OnboardingView: View {
                     .font(.system(size: 14)).foregroundStyle(Theme.body).fixedSize(horizontal: false, vertical: true)
                 Spacer()
                 VStack(alignment: .leading, spacing: 10) {
-                    bullet("Decides on your Mac with a small local model")
                     bullet("Never acts without your tap")
-                    bullet("Open source: read every rule it follows")
+                    bullet("Undo anything it did")
+                    bullet("Your files never leave your Mac")
                 }
             }
             .padding(28).frame(width: 300).frame(maxHeight: .infinity, alignment: .top).background(Theme.well)

@@ -2,45 +2,83 @@ import AppKit
 import SparehandCore
 import SwiftUI
 
-/// The tap: what Sparehand noticed and why, the proof, one action, and where it was decided.
+/// The tap. Collapsed: what, the benefit, act. Expanded: what will happen, why now, the steps, examples, Never.
 struct TapCard: View {
     let tap: Tap
+    var expanded: Bool
     var onApprove: () -> Void
     var onDismiss: () -> Void
     var onNever: () -> Void
-
-    var local: Bool { tap.candidate.origin == .skill }
+    var onToggle: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                HandMark(size: 13).frame(width: 24, height: 24).background(Theme.decideSoft, in: RoundedRectangle(cornerRadius: 7))
-                Spacer()
-                HStack(spacing: 4) {
-                    Image(systemName: local ? "laptopcomputer" : "sparkle").font(.system(size: 9, weight: .bold))
-                    Text(local ? "On your Mac" : "Asked Claude").font(.system(size: 11, weight: .semibold))
-                }
-                .padding(.horizontal, 8).padding(.vertical, 3)
-                .foregroundStyle(local ? Theme.working : Theme.decide)
-                .background((local ? Theme.working : Theme.decide).opacity(0.1), in: Capsule())
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(tap.verdict.title).font(Theme.heading(17)).foregroundStyle(Theme.ink).lineLimit(2)
+                Spacer(minLength: 0)
             }
-            VStack(alignment: .leading, spacing: 4) {
-                Text(tap.verdict.title).font(Theme.heading(18)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
-                Text(tap.verdict.body).font(.system(size: 13.5)).foregroundStyle(Theme.body).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            if let b = tap.candidate.benefit, !b.isEmpty {
+                Label(b, systemImage: "arrow.up.right")
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.working)
+                    .labelStyle(TightLabel())
             }
-            Label(tap.candidate.why, systemImage: "eye")
-                .font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(1)
+            if expanded { details.transition(.opacity) }
             HStack(spacing: 8) {
                 Button(tap.verdict.actionLabel, action: onApprove).buttonStyle(PillButton(fill: Theme.decide, text: .white))
                 Button("Not now", action: onDismiss).buttonStyle(PillButton(fill: .white, text: Theme.ink, border: Theme.hairline))
                 Spacer()
-                Button("Never", action: onNever).buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Theme.muted)
+                Button(action: onToggle) {
+                    HStack(spacing: 3) {
+                        Text(expanded ? "Less" : "Details")
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 9, weight: .bold))
+                    }
+                }
+                .buttonStyle(.plain).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.body)
             }
         }
         .padding(16)
         .frame(width: 360)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
         .environment(\.colorScheme, .light)
+    }
+
+    var details: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            row("WHAT HAPPENS", tap.verdict.body)
+            row("WHY NOW", tap.candidate.why)
+            if tap.candidate.steps.count > 1 {
+                row("STEPS", tap.candidate.steps.enumerated().map { "\($0.offset + 1). " + WatchableRun.describe($0.element) }.joined(separator: "\n"))
+            }
+            if !tap.candidate.evidence.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("FOR EXAMPLE").font(.system(size: 10, weight: .semibold)).kerning(0.5).foregroundStyle(Theme.muted)
+                    ForEach(Array(tap.candidate.evidence.prefix(3).enumerated()), id: \.offset) { _, e in
+                        Text(e.label).font(.system(size: 12)).foregroundStyle(Theme.body).lineLimit(1).truncationMode(.middle)
+                    }
+                }
+            }
+            HStack {
+                Label(tap.candidate.isReversible ? "Undo any time" : "Can't be undone", systemImage: "arrow.uturn.backward")
+                    .labelStyle(TightLabel()).font(.system(size: 11.5)).foregroundStyle(Theme.muted)
+                Spacer()
+                Button("Never offer this", action: onNever).buttonStyle(.plain).font(.system(size: 11.5)).foregroundStyle(Theme.muted)
+            }
+        }
+        .padding(12)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    func row(_ label: String, _ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.system(size: 10, weight: .semibold)).kerning(0.5).foregroundStyle(Theme.muted)
+            Text(text).font(.system(size: 12.5)).foregroundStyle(Theme.body).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+struct TightLabel: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 4) { configuration.icon.font(.system(size: 10, weight: .bold)); configuration.title }
     }
 }
 
@@ -59,6 +97,7 @@ final class TapPanel {
     private let panel: NSPanel
     private weak var model: AppModel?
     private var taps: [Tap] = []
+    private var expanded: Set<String> = []
 
     init(model: AppModel) {
         self.model = model
@@ -86,13 +125,20 @@ final class TapPanel {
 
     func hide() { taps = []; panel.orderOut(nil) }
 
+    func toggle(_ id: String) {
+        if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
+        layout(fade: false)
+    }
+
     private func layout(fade: Bool) {
         guard !taps.isEmpty else { panel.orderOut(nil); return }
         let stack = VStack(spacing: 10) {
             ForEach(taps) { tap in
-                TapCard(tap: tap, onApprove: { [weak self] in self?.model?.approve(tap) },
+                TapCard(tap: tap, expanded: self.expanded.contains(tap.id),
+                        onApprove: { [weak self] in self?.model?.approve(tap) },
                         onDismiss: { [weak self] in self?.model?.dismiss(tap) },
-                        onNever: { [weak self] in self?.model?.never(tap) })
+                        onNever: { [weak self] in self?.model?.never(tap) },
+                        onToggle: { [weak self] in self?.toggle(tap.id) })
                     .shadow(color: .black.opacity(0.18), radius: 14, y: 6)
             }
         }
@@ -101,9 +147,10 @@ final class TapPanel {
         host.layoutSubtreeIfNeeded()
         let size = host.fittingSize
         panel.contentView = host
-        if let screen = NSScreen.main {
-            let f = screen.visibleFrame
-            panel.setFrame(NSRect(x: f.maxX - size.width - 8, y: f.maxY - size.height, width: size.width, height: size.height), display: true)
+        let screen = NSScreen.screens.first { $0.frame.origin == .zero } ?? NSScreen.main
+        if let f = screen?.visibleFrame {
+            let h = min(size.height, f.height)
+            panel.setFrame(NSRect(x: f.maxX - size.width - 8, y: f.maxY - h, width: size.width, height: h), display: true)
         }
         if fade {
             panel.alphaValue = 0

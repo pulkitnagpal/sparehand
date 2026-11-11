@@ -16,11 +16,16 @@ struct FeedView: View {
                 Text(model.isPaused ? "Paused" : "Watching").font(.system(size: 12)).foregroundStyle(Theme.body)
             }
             .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 6)
-            HStack(spacing: 12) {
-                health("On-device", model.localReady)
-                health("Claude", model.claude != nil)
+            Group {
+                if model.claude == nil {
+                    Text("Connect Claude in Settings to get new suggestions.")
+                } else if !model.localReady {
+                    Text("Getting ready…")
+                }
             }
-            .padding(.horizontal, 16).padding(.bottom, 12)
+            .font(.system(size: 11.5)).foregroundStyle(Theme.muted)
+            .padding(.horizontal, 16)
+            Spacer().frame(height: 12)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
