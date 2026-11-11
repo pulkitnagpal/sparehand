@@ -76,6 +76,15 @@ case "memory":
     for m in await engine.memory() { print("- " + m) }
 case "skills":
     for s in Skills.all(env.store) { print("- \(s.titleTemplate)  [\(s.steps.map(\.tool).joined(separator: ", "))]  min \(s.minCount)") }
+case "run-plan":
+    // Testing only: run a hand-written plan through the same tools, journal and undo as an approved card.
+    guard args.count > 1, let obj = try? JSONSerialization.jsonObject(with: Data(args[1].utf8)) as? [Any] else { fail("run-plan '<json steps>'") }
+    let steps = obj.compactMap { s -> ToolCall? in
+        let v = JSONValue(any: s); guard let t = v["tool"]?.string else { return nil }; return ToolCall(tool: t, args: v["args"] ?? .object([:]))
+    }
+    let c = Candidate(id: "plan-\(Int(Date().timeIntervalSince1970))", origin: .claude, why: "manual test", steps: steps, noticedAt: Date())
+    try? env.store.upsert(Tap(candidate: c, verdict: Verdict(title: "Manual plan", body: "", actionLabel: "Run", confidence: 5), createdAt: Date()))
+    if let t = await engine.approve(c.id, progress: { print("  … " + $0) }) { show(t) }
 case "demo-seed":
     DemoSeed.run(home: env.home, count: Int(args.dropFirst().first ?? "25") ?? 25)
 default:

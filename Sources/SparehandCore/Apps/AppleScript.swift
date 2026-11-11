@@ -14,10 +14,13 @@ public struct ScriptError: Error, Sendable, Equatable {
 
 /// Runs scripts through /usr/bin/osascript (safe from any thread; one process per call).
 public struct OSAScriptRunner: ScriptRunner {
-    public init() {}
+    /// A frozen app (or a permission prompt nobody has answered) must never stall Sparehand.
+    public var timeout: TimeInterval
+    public init(timeout: TimeInterval = 8) { self.timeout = timeout }
 
     public func run(_ source: String) async throws -> String {
-        try await Task.detached {
+        let timeout = self.timeout
+        return try await Task.detached {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
             p.arguments = ["-"]
@@ -26,9 +29,13 @@ public struct OSAScriptRunner: ScriptRunner {
             try p.run()
             input.fileHandleForWriting.write(Data(source.utf8))
             try input.fileHandleForWriting.close()
+            let deadline = DispatchWorkItem { if p.isRunning { p.terminate() } }
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: deadline)
+            defer { deadline.cancel() }
             let out = output.fileHandleForReading.readDataToEndOfFile()
             let err = errors.fileHandleForReading.readDataToEndOfFile()
             p.waitUntilExit()
+            if p.terminationReason == .uncaughtSignal { throw ScriptError(code: -1712, message: "The app didn't answer in time.") }
             if p.terminationStatus != 0 {
                 let message = String(decoding: err, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
                 throw ScriptError(code: Self.code(in: message), message: message)

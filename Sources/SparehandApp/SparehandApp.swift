@@ -38,6 +38,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.setActivationPolicy(.accessory)
         model.start()
+        if CommandLine.arguments.contains("--look-now") {   // testing and demos: look once right away
+            Task { try? await Task.sleep(for: .seconds(2)); await model.look(force: true) }
+            return
+        }
         if (try? model.store.setting("onboarded")) ?? nil == nil { showOnboarding() }
     }
 
