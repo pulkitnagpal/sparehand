@@ -10,12 +10,18 @@ struct TapCard: View {
     var onDismiss: () -> Void
     var onNever: () -> Void
     var onToggle: () -> Void
+    var onClose: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(tap.verdict.title).font(Theme.heading(17)).foregroundStyle(Theme.ink).lineLimit(2)
-                Spacer(minLength: 0)
+                Spacer(minLength: 8)
+                Button(action: onClose) {
+                    Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.muted)
+                        .frame(width: 20, height: 20).background(Theme.surface, in: Circle())
+                }
+                .buttonStyle(.plain).help("Hide for now. It stays in the menu bar.")
             }
             if let b = tap.candidate.benefit, !b.isEmpty {
                 Label(b, systemImage: "arrow.up.right")
@@ -138,7 +144,8 @@ final class TapPanel {
                         onApprove: { [weak self] in self?.model?.approve(tap) },
                         onDismiss: { [weak self] in self?.model?.dismiss(tap) },
                         onNever: { [weak self] in self?.model?.never(tap) },
-                        onToggle: { [weak self] in self?.toggle(tap.id) })
+                        onToggle: { [weak self] in self?.toggle(tap.id) },
+                        onClose: { [weak self] in self?.remove(tap.id) })
                     .shadow(color: .black.opacity(0.18), radius: 14, y: 6)
             }
         }
