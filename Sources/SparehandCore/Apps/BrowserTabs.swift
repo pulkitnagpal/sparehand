@@ -32,6 +32,27 @@ public enum BrowserTabs {
         """
     }
 
+    /// Closes the tabs whose URL is exactly one of `urls`, in every window, back to front.
+    public static func closeScript(app: String, urls: [String]) -> String {
+        let list = "{" + urls.map(AppleScriptText.quoted).joined(separator: ", ") + "}"
+        let urlProp = "URL"
+        return """
+        tell application \(AppleScriptText.quoted(app))
+          set wanted to \(list)
+          repeat with w in windows
+            repeat with i from (count of tabs of w) to 1 by -1
+              if (\(urlProp) of tab i of w) is in wanted then close tab i of w
+            end repeat
+          end repeat
+        end tell
+        """
+    }
+
+    public static func bundleID(_ app: String) -> String? {
+        ["Google Chrome": "com.google.Chrome", "Arc": "company.thebrowser.Browser", "Dia": "company.thebrowser.dia",
+         "Brave Browser": "com.brave.Browser", "Microsoft Edge": "com.microsoft.edgemac", "Safari": "com.apple.Safari"][app]
+    }
+
     /// Only http(s) tabs with a title.
     public static func parse(_ output: String, browser: String) -> [Tab] {
         output.split(separator: "\u{1E}").compactMap { record in

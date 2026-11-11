@@ -1,136 +1,92 @@
 import AppKit
 import SparehandCore
 
-/// Runs "tabs → note" on Sparehand's own screen so the user can watch: Terminal with Claude Code, then Notes.
-final class WatchableJobRunner: JobRunner, @unchecked Sendable {
-    weak var model: AppModel?
+/// Runs an approved plan on Sparehand's own screen so the user can watch: a Finder window of the destination fills up
+/// while files are sorted, and a created note opens there. The user's own windows are never touched.
+@MainActor
+final class WatchableRun {
+    let model: AppModel
     init(model: AppModel) { self.model = model }
 
-    static let steps = ["Opened Terminal on Sparehand's screen", "Claude is reading the pages", "Making the table", "Putting it in Notes"]
+    static let fileTools: Set<String> = ["sort_by_content", "organize_files"]
 
-    func runTabsToNote(tap: Tap) async throws -> String {
-        guard case .tabsToNote(let topic, _) = tap.candidate.plan else { throw ClaudeJobError.failed("Not a tabs job") }
-        guard let model = await MainActor.run(body: { self.model }) else { throw ClaudeJobError.failed("Sparehand is closing") }
-        let screen = await MainActor.run { model.screen }
-        let viewer = await MainActor.run { LiveViewer(screen: screen) }
+    func run(_ tap: Tap) async -> Tap? {
+        let fileStep = tap.candidate.steps.first { Self.fileTools.contains($0.tool) }
+        let noteStep = tap.candidate.steps.contains { $0.tool == "create_note" }
+        guard fileStep != nil || noteStep else { return await model.engine.approve(tap.id) }
+
+        let screen = model.screen
+        let viewer = LiveViewer(screen: screen)
         let scripts = OSAScriptRunner()
-        let terminal = TerminalLauncher(runner: scripts)
-        let notes = NotesWriter(runner: scripts)
-        let jobs = SparehandCore.Environment.supportDirectory.appendingPathComponent("jobs", isDirectory: true)
-        let htmlFile = jobs.appendingPathComponent("\(tap.id).html")
-        let errorFile = jobs.appendingPathComponent("\(tap.id).error")
-        try? FileManager.default.removeItem(at: htmlFile)
-        try? FileManager.default.removeItem(at: errorFile)
-        let match = "claude-run --job \(tap.id)"
-
-        var terminalWindow: Int?
-        func cleanUp() async {
-            if let w = terminalWindow { try? await terminal.close(windowID: w) }
-            await viewer.stop()
-            await MainActor.run { screen.stop() }
-        }
-
+        var finderWindow: String?
+        defer { }
         do {
             let bounds = try await screen.start()
-            let area = await MainActor.run { screen.workArea() }
-            await MainActor.run {
-                viewer.setSteps(Self.steps)
-                viewer.status = "Starting Claude Code…"
-                viewer.onStop = { Self.signal("TERM", match) }
-                viewer.onPause = { Self.togglePause(match, viewer: viewer) }
+            let area = screen.workArea()
+            viewer.setSteps(tap.candidate.steps.map { Self.describe($0) } + ["Done"])
+            viewer.status = "Starting on Sparehand's screen…"
+            if let step = fileStep {
+                let dest = Tools.folderURL(step.args["into"]?.string ?? "~/Pictures/Screenshots", home: model.env.home)!
+                try? FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+                finderWindow = try? await scripts.run(Self.finderOpen(dest, area)).trimmingCharacters(in: .whitespacesAndNewlines)
+                try await Task.sleep(for: .milliseconds(700))
+                if let id = WindowFinder.windowID(owner: "Finder", title: dest.lastPathComponent, inside: bounds) {
+                    try await viewer.start(windowIDs: [id])
+                }
             }
-            let cli = Paths.cli.path
-            let id = try await terminal.open(command: "clear; \(Self.shellQuote(cli)) claude-run --job \(tap.id); exit", title: "Sparehand · Claude Code")
-            terminalWindow = id
-            let left = CGRect(x: area.minX, y: area.minY, width: area.width * 0.58, height: area.height)
-            try await terminal.setBounds(windowID: id, left)
-            try await Task.sleep(for: .milliseconds(500))
-            let cgID = CGWindowID(id)
-            let windowID = WindowFinder.exists(cgID) ? cgID : (WindowFinder.windowID(owner: "Terminal", title: nil, inside: bounds) ?? cgID)
-            try await viewer.start(windowIDs: [windowID])
-            await MainActor.run { viewer.advance(to: 1); viewer.status = "Claude Code is reading \(topic.lowercased()) pages…" }
-
-            // Wait for the CLI to leave its answer (or an error) in the jobs folder.
-            var waited = 0.0
-            while !FileManager.default.fileExists(atPath: htmlFile.path) {
-                if let message = try? String(contentsOf: errorFile, encoding: .utf8) { throw ClaudeJobError.failed(message) }
-                if waited > 600 { throw ClaudeJobError.failed("Claude took longer than 10 minutes") }
-                try await Task.sleep(for: .milliseconds(500))
-                waited += 0.5
+            let result = await model.engine.approve(tap.id) { line in
+                Task { @MainActor in viewer.status = line }
             }
-            await MainActor.run { viewer.advance(to: 2); viewer.status = "Table ready." }
-            let table = try String(contentsOf: htmlFile, encoding: .utf8)
-
-            await MainActor.run { viewer.advance(to: 3); viewer.status = "Creating the note…" }
-            let notesRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Notes").isEmpty
-            let before = await notes.userWindowCount(notesRunning: notesRunning)
-            let noteID = try await notes.create(title: "\(topic), compared", html: table)
-            if let nw = try? await notes.show(noteID: noteID, ifNoUserWindows: before) {
-                let right = CGRect(x: area.minX + area.width * 0.42, y: area.minY + 40, width: area.width * 0.58, height: area.height - 40)
-                try? await notes.setBounds(windowID: nw, right)
-                try await Task.sleep(for: .milliseconds(600))
-                if let cg = WindowFinder.windowID(owner: "Notes", title: nil, inside: bounds) { try? await viewer.add(windowID: cg) }
+            if noteStep, let bounds = screen.bounds {
+                let notes = NotesWriter(runner: scripts)
+                let running = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Notes").isEmpty
+                let before = await notes.userWindowCount(notesRunning: running)
+                if let ref = Tools.createdNoteID(tapID: tap.id, store: model.store),
+                   let nw = try? await notes.show(noteID: ref, ifNoUserWindows: before) {
+                    try? await notes.setBounds(windowID: nw, area.insetBy(dx: 200, dy: 60))
+                    try await Task.sleep(for: .milliseconds(600))
+                    if let cg = WindowFinder.windowID(owner: "Notes", title: nil, inside: bounds) {
+                        if fileStep == nil { try await viewer.start(windowIDs: [cg]) } else { try? await viewer.add(windowID: cg) }
+                    }
+                }
             }
-            await MainActor.run { viewer.finishSteps(); viewer.status = "Done. The note is in Notes." }
-            try await Task.sleep(for: .seconds(5))
-            await cleanUp()
-            return noteID
+            viewer.finishSteps()
+            viewer.status = result?.note ?? "Done."
+            try await Task.sleep(for: .seconds(4))
+            if let w = finderWindow, !w.isEmpty { _ = try? await scripts.run("tell application \"Finder\" to close window id \(w)") }
+            await viewer.stop()
+            screen.stop()
+            return result
         } catch {
-            await MainActor.run { viewer.needsYou = true; viewer.status = Engine.describeForUser(error) }
-            Self.signal("TERM", match)
-            try? await Task.sleep(for: .seconds(6))
-            await cleanUp()
-            throw error
+            viewer.needsYou = true
+            viewer.status = "\(error)"
+            await viewer.stop()
+            screen.stop()
+            return await model.engine.tap(tap.id)
         }
     }
 
-    static func shellQuote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
-
-    /// Sends a signal to the job's CLI and its Claude Code child.
-    static func signal(_ sig: String, _ match: String) {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        p.arguments = ["-\(sig)", "-f", match]
-        try? p.run()
-        p.waitUntilExit()
-        let c = Process()
-        c.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        c.arguments = ["-\(sig)", "-P", "\(childOf(match) ?? -1)"]
-        if childOf(match) != nil { try? c.run(); c.waitUntilExit() }
-    }
-
-    static func childOf(_ match: String) -> Int32? {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-        p.arguments = ["-f", match]
-        let out = Pipe(); p.standardOutput = out
-        try? p.run(); p.waitUntilExit()
-        return Int32(String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).split(separator: "\n").first ?? "")
-    }
-
-    @MainActor static func togglePause(_ match: String, viewer: LiveViewer) {
-        let paused = viewer.status.hasPrefix("Paused")
-        signal(paused ? "CONT" : "STOP", match)
-        viewer.status = paused ? "Resumed." : "Paused. Press Pause again to continue."
-    }
-}
-
-extension WindowFinder {
-    static func exists(_ id: CGWindowID) -> Bool {
-        let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], id) as? [[String: Any]] ?? []
-        return !list.isEmpty
-    }
-}
-
-extension Engine {
-    nonisolated static func describeForUser(_ error: Error) -> String {
-        switch error {
-        case ClaudeJobError.failed(let m): return m
-        case ClaudeJobError.noTable: return "Claude didn't return a table."
-        case ClaudeJobError.notInstalled: return "Claude Code isn't installed."
-        case let e as ScriptError: return e.message
-        case AgentScreen.Failure.unavailable: return "This Mac couldn't create Sparehand's screen."
-        default: return "\(error)"
+    static func describe(_ s: ToolCall) -> String {
+        switch s.tool {
+        case "sort_by_content": "Read each file and sort it into \((s.args["folders"]?.strings ?? []).prefix(4).joined(separator: ", "))…"
+        case "organize_files": "Move files into monthly folders"
+        case "move_to_bin": "Move files to the Bin"
+        case "close_tabs": "Close \(s.args["urls"]?.strings.count ?? 0) tabs"
+        case "stop_container": "Stop " + (s.args["names"]?.strings ?? []).joined(separator: ", ")
+        case "quit_app": "Quit \(s.args["name"]?.string ?? "the app")"
+        case "create_note": "Write the note “\(s.args["title"]?.string ?? "")”"
+        default: s.tool
         }
+    }
+
+    static func finderOpen(_ dir: URL, _ rect: CGRect) -> String {
+        """
+        tell application "Finder"
+          set w to make new Finder window to (POSIX file \(AppleScriptText.quoted(dir.path)) as alias)
+          set current view of w to icon view
+          set bounds of w to \(TerminalLauncher.bounds(rect.insetBy(dx: 160, dy: 40)))
+          return id of w
+        end tell
+        """
     }
 }

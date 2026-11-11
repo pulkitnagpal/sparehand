@@ -35,7 +35,7 @@ public final class Store: @unchecked Sendable {
     public func upsert(_ tap: Tap) throws {
         let json = try encoder.encode(tap)
         try run("INSERT INTO taps(id, json, state, watcher, created_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET json=excluded.json, state=excluded.state",
-                [.text(tap.id), .blob(json), .text(tap.state.rawValue), .text(tap.candidate.watcher.rawValue), .real(tap.createdAt.timeIntervalSince1970)])
+                [.text(tap.id), .blob(json), .text(tap.state.rawValue), .text(tap.candidate.origin.rawValue), .real(tap.createdAt.timeIntervalSince1970)])
     }
 
     public func tap(id: String) throws -> Tap? {
@@ -50,8 +50,11 @@ public final class Store: @unchecked Sendable {
                          states.map { .text($0.rawValue) }) { try self.decoder.decode(Tap.self, from: $0.blob(0)) }
     }
 
-    public func lastShown(watcher: WatcherID) throws -> Date? {
-        try query("SELECT MAX(created_at) FROM taps WHERE watcher = ?", [.text(watcher.rawValue)]) { $0.isNull(0) ? nil : Date(timeIntervalSince1970: $0.real(0)) }.first ?? nil
+    /// Taps created at or after `date`, newest first (any state).
+    public func taps(since date: Date) throws -> [Tap] {
+        try query("SELECT json FROM taps WHERE created_at >= ? ORDER BY created_at DESC", [.real(date.timeIntervalSince1970)]) {
+            try self.decoder.decode(Tap.self, from: $0.blob(0))
+        }
     }
 
     /// When this URL was first seen open; records `now` the first time.

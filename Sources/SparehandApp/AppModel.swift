@@ -21,12 +21,6 @@ struct DesktopQuietRules: QuietRules {
 }
 
 enum Paths {
-    /// The bundled `sparehand` CLI (Contents/Resources in the app; next to the binary during development).
-    static var cli: URL {
-        if let u = Bundle.main.url(forResource: "sparehand", withExtension: nil) { return u }
-        return Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent("sparehand")
-    }
-
     static var judgeScript: URL? {
         if let u = Bundle.main.url(forResource: "judge-server", withExtension: "sh") { return u }
         let dev = Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent("../../scripts/judge-server.sh").standardized
@@ -39,47 +33,49 @@ final class AppModel: ObservableObject {
     @Published var pending: [Tap] = []
     @Published var done: [Tap] = []
     @Published var pausedUntil: Date?
-    @Published var judgeStatus = "Checking the local model…"
+    @Published var status = "Starting…"
     @Published var busyTapID: String?
+    @Published var lastLook: [String] = []
 
     let store: Store
     let env: SparehandCore.Environment
     let screen = AgentScreen()
+    let claude: ClaudeBackend?
     private(set) var engine: Engine!
-    private var timer: Timer?
+    private var sampleTimer: Timer?
+    private var lookTimer: Timer?
     private var watchers: [DispatchSourceFileSystemObject] = []
     lazy var tapPanel = TapPanel(model: self)
+    lazy var runner = WatchableRun(model: self)
 
     init() {
-        do { store = try Store(path: SparehandCore.Environment.supportDirectory.appendingPathComponent("sparehand.sqlite")) }
+        do { store = try Store(path: SparehandCore.Environment.supportDirectory.appendingPathComponent("sparehand-v1.sqlite")) }
         catch { fatalError("Sparehand can't open its database: \(error)") }
         env = SparehandCore.Environment.live(store: store)
-        engine = Engine(env: env,
-                        watchers: [ScreenshotsWatcher(), BinWatcher(), TabsWatcher()],
-                        judge: FallbackJudge(primary: LocalModelJudge()),
-                        quiet: DesktopQuietRules(),
-                        jobs: WatchableJobRunner(model: self))
+        claude = Claude.fromKeychain()
+        engine = Engine(env: env, senses: Senses(env: env), local: LocalModel(), claude: claude, quiet: DesktopQuietRules())
     }
 
     func start() {
-        startJudge()
-        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in Task { @MainActor in await self.tick() } }
+        startLocalModel()
+        sampleTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in Task { @MainActor in await self.engine.sample() } }
+        lookTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { _ in Task { @MainActor in await self.look() } }
         watch(env.desktop)
-        watch(env.trash)
-        Task { await tick() }
+        watch(env.home.appendingPathComponent("Downloads"))
+        Task { await engine.sample(); await refreshFeed() }
     }
 
     var isPaused: Bool { (pausedUntil ?? .distantPast) > Date() }
-
     func pause(hours: Double) { pausedUntil = Date().addingTimeInterval(hours * 3600) }
     func resume() { pausedUntil = nil }
 
-    func tick() async {
+    /// One look at the Mac. `force` is the "Look now" button: it skips the quiet and limit checks.
+    func look(force: Bool = false) async {
+        guard force || !isPaused, busyTapID == nil else { return }
+        let r = await engine.look(force: force)
+        lastLook = r.steps
         await refreshFeed()
-        guard !isPaused, busyTapID == nil else { return }
-        let fresh = await engine.tick()
-        await refreshFeed()
-        if let first = fresh.first { tapPanel.show(first) }
+        if let first = r.taps.first { tapPanel.show(first) }
     }
 
     func refreshFeed() async {
@@ -89,19 +85,10 @@ final class AppModel: ObservableObject {
     }
 
     func approve(_ tap: Tap) {
-        if case .deletePermanently(let urls) = tap.candidate.plan {
-            let alert = NSAlert()
-            alert.messageText = "Empty \(urls.count) \(urls.count == 1 ? "item" : "items") from the Bin?"
-            alert.informativeText = urls.map(\.lastPathComponent).joined(separator: "\n") + "\n\nThis can't be undone."
-            alert.addButton(withTitle: "Empty \(urls.count)")
-            alert.addButton(withTitle: "Cancel")
-            NSApp.activate()
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-        }
         tapPanel.hide()
         busyTapID = tap.id
         Task {
-            _ = await engine.approve(tap.id)
+            _ = await runner.run(tap)
             busyTapID = nil
             await refreshFeed()
         }
@@ -112,15 +99,21 @@ final class AppModel: ObservableObject {
         Task { await engine.dismiss(tap.id); await refreshFeed() }
     }
 
+    func never(_ tap: Tap) {
+        tapPanel.hide()
+        Task { await engine.never(tap.id); await refreshFeed() }
+    }
+
     func undo(_ tap: Tap) {
         Task { _ = await engine.undo(tap.id); await refreshFeed() }
     }
 
-    // MARK: - Judge server
+    // MARK: - Local model
 
-    func startJudge() {
-        guard let script = Paths.judgeScript else { judgeStatus = "Local model script missing: using simple rules"; return }
-        judgeStatus = "Starting the local model (first time downloads it)…"
+    func startLocalModel() {
+        let cloud = claude?.label ?? "no Claude connected"
+        guard let script = Paths.judgeScript else { status = "Local model script missing · \(cloud)"; return }
+        status = "Starting the local model… · \(cloud)"
         Task.detached {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/bin/zsh")
@@ -128,22 +121,22 @@ final class AppModel: ObservableObject {
             let out = Pipe(); p.standardOutput = out; p.standardError = out
             try? p.run(); p.waitUntilExit()
             let ok = p.terminationStatus == 0
-            await MainActor.run { self.judgeStatus = ok ? "Local model ready" : "Local model unavailable: using simple rules" }
+            await MainActor.run { self.status = (ok ? "Local model ready" : "Local model unavailable") + " · \(cloud)" }
         }
     }
 
-    // MARK: - Folder watching
+    // MARK: - Folder watching: new files trigger an early look
 
     private func watch(_ dir: URL) {
         let fd = open(dir.path, O_EVTONLY)
-        guard fd >= 0 else { return }   // e.g. the Bin without Full Disk Access
+        guard fd >= 0 else { return }
         let src = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: .main)
-        var pendingTick: DispatchWorkItem?
+        var pendingLook: DispatchWorkItem?
         src.setEventHandler { [weak self] in
-            pendingTick?.cancel()
-            let item = DispatchWorkItem { Task { @MainActor in await self?.tick() } }
-            pendingTick = item
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: item)
+            pendingLook?.cancel()
+            let item = DispatchWorkItem { Task { @MainActor in await self?.look() } }
+            pendingLook = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: item)
         }
         src.setCancelHandler { close(fd) }
         src.resume()

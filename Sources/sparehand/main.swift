@@ -1,18 +1,20 @@
 import Foundation
 import SparehandCore
 
-// sparehand: the command-line side of Sparehand (debugging, demo seeding, and the watchable Claude Code runner).
+// sparehand: the command-line side of Sparehand. Same engine as the app, for testing the whole loop and seeding demos.
 setvbuf(stdout, nil, _IONBF, 0)
 
 let usage = """
     usage:
-      sparehand scan                       show what the watchers notice and what the judge says (no actions)
-      sparehand judge --sample <watcher>   ask the judge about a sample (screenshots | bin | tabs)
-      sparehand claude-run --job <tapID>   run the tabs → note job with Claude Code, printing its progress
-      sparehand undo <tapID>               undo a done suggestion
-      sparehand terminal-test              open a Terminal window Sparehand owns, then close it
-      sparehand note-test                  create and delete a test note in Notes
-      sparehand demo-seed [options]        fill a Demo account with screenshots, Bin items and tabs
+      sparehand look [--force]        look at the Mac once and print each step of the decision (creates a pending card)
+      sparehand feed                  pending cards and what was done today
+      sparehand approve <id>          run a card's plan, printing progress
+      sparehand undo <id>             undo a done card
+      sparehand dismiss <id>          Not now
+      sparehand never <id>            Never for this (goes into memory)
+      sparehand memory | skills       what Sparehand knows and has learned
+      sparehand demo-seed <count>     put <count> realistic screenshots on the Desktop of $SPAREHAND_HOME (or this account)
+    Set SPAREHAND_HOME to run against a test home folder.
     """
 
 func fail(_ message: String) -> Never {
@@ -20,132 +22,62 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
-func openStore() -> Store {
-    do { return try Store(path: Environment.supportDirectory.appendingPathComponent("sparehand.sqlite")) }
+func makeEngine() -> (Engine, Environment) {
+    let store: Store
+    do { store = try Store(path: Environment.supportDirectory.appendingPathComponent("sparehand-v1.sqlite")) }
     catch { fail("can't open the store: \(error)") }
+    let env = Environment.live(store: store)
+    let engine = Engine(env: env, senses: Senses(env: env), local: LocalModel(), claude: Claude.fromKeychain(), quiet: NeverQuiet())
+    return (engine, env)
 }
 
-func value(after flag: String, in args: [String]) -> String? {
-    guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
-    return args[i + 1]
+func show(_ t: Tap) {
+    let badge = t.candidate.origin == .claude ? "asked Claude" : "noticed on your Mac"
+    print("[\(t.id)] \(t.state.rawValue) · \(badge)")
+    print("  \(t.verdict.title)")
+    print("  \(t.verdict.body)")
+    print("  why: \(t.candidate.why)")
+    for e in t.candidate.evidence { print("  · \(e.label)  \(e.detail)") }
+    print("  steps: " + t.candidate.steps.map { s in
+        "\(s.tool)(" + (String(data: (try? JSONEncoder().encode(s.args)) ?? Data(), encoding: .utf8) ?? "") + ")"
+    }.joined(separator: " → "))
+    if let n = t.note { print("  result: \(n)") }
 }
 
-let watchers: [any Watcher] = [ScreenshotsWatcher(), BinWatcher(), TabsWatcher()]
 let args = Array(CommandLine.arguments.dropFirst())
+let (engine, env) = makeEngine()
 
 switch args.first {
-case "scan":
-    let env = Environment.live(store: openStore())
-    let judge = FallbackJudge(primary: LocalModelJudge())
-    for w in watchers {
-        let found = (try? await w.candidates(env)) ?? []
-        print("[\(w.id.rawValue)] \(found.isEmpty ? "nothing" : "\(found.count) candidate(s)")")
-        for c in found {
-            let v = await judge.verdict(for: c)
-            print("  \(c.summary)")
-            print("  → \(v.show ? "show" : "stay quiet") (\(v.source.rawValue)): \(v.title) · \(v.body) [\(v.actionLabel)]")
-        }
-    }
-
-case "judge":
-    let samples: [String: Candidate] = [
-        "screenshots": Candidate(id: "sample-s", watcher: .screenshots, summary: "120 screenshots are on the Desktop, oldest from June 2026; 3 recent ones would stay.",
-                                 facts: ["count": "120", "kept": "3", "oldestMonth": "June 2026"], evidence: [], plan: .moveFiles([]), noticedAt: Date()),
-        "bin": Candidate(id: "sample-b", watcher: .bin, summary: "The Bin holds 12.4 GB; the 3 largest items are 11.3 GB.",
-                         facts: ["totalGB": "12.4 GB", "itemsGB": "11.3 GB", "n": "3"], evidence: [], plan: .deletePermanently([]), noticedAt: Date()),
-        "tabs": Candidate(id: "sample-t", watcher: .tabs, summary: "7 open tabs about Standing Desks, open since Monday.",
-                          facts: ["count": "7", "topic": "Standing Desks", "since": "Monday"], evidence: [], plan: .tabsToNote(topic: "Standing Desks", tabs: []), noticedAt: Date()),
-    ]
-    guard let name = value(after: "--sample", in: args), let c = samples[name] else { fail(usage) }
-    let start = Date()
-    let v = await FallbackJudge(primary: LocalModelJudge()).verdict(for: c)
-    print("\(v.show ? "show" : "stay quiet") (\(v.source.rawValue), \(String(format: "%.1f", Date().timeIntervalSince(start))) s): \(v.title) · \(v.body) [\(v.actionLabel)]")
-
-case "claude-run":
-    guard let id = value(after: "--job", in: args) else { fail(usage) }
-    let store = openStore()
-    guard let tap = try? store.tap(id: id), case .tabsToNote(let topic, let tabs) = tap.candidate.plan else { fail("no tabs job \(id)") }
-    let jobs = Environment.supportDirectory.appendingPathComponent("jobs", isDirectory: true)
-    try? FileManager.default.createDirectory(at: jobs, withIntermediateDirectories: true)
-    let errorFile = jobs.appendingPathComponent("\(id).error")
-    try? FileManager.default.removeItem(at: errorFile)
-    func giveUp(_ message: String) -> Never {
-        print("\n\(message)")
-        try? message.write(to: errorFile, atomically: true, encoding: .utf8)
-        exit(1)
-    }
-    guard let claude = ClaudeJob.locate() else { giveUp("Claude Code isn't installed.") }
-
-    print("Sparehand → Claude Code\n")
-    print("Comparing \(tabs.count) pages about \(topic):")
-    for t in tabs { print("  • \(t.title)") }
-    print("")
-    let p = Process()
-    p.executableURL = claude
-    p.arguments = ClaudeJob.arguments(prompt: ClaudeJob.prompt(topic: topic, tabs: tabs))
-    let out = Pipe()
-    p.standardOutput = out
-    p.standardError = FileHandle.nullDevice
-    do { try p.run() } catch { giveUp("Couldn't start Claude Code: \(error)") }
-    var lines: [String] = []
-    var buffer = Data()
-    let handle = out.fileHandleForReading
-    while true {
-        let chunk = handle.availableData
-        if chunk.isEmpty { break }
-        buffer.append(chunk)
-        while let nl = buffer.firstIndex(of: 0x0A) {
-            let line = String(decoding: buffer[..<nl], as: UTF8.self)
-            buffer.removeSubrange(...nl)
-            lines.append(line)
-            if let shown = ClaudeJob.progressLine(line) { print("  \(shown)") }
-        }
-    }
-    p.waitUntilExit()
-    do {
-        let table = ClaudeJob.sanitize(try ClaudeJob.extractTable(try ClaudeJob.finalText(lines)))
-        try table.write(to: jobs.appendingPathComponent("\(id).html"), atomically: true, encoding: .utf8)
-        print("\nTable saved. Putting it in Notes…")
-    } catch ClaudeJobError.noTable {
-        giveUp("Claude didn't return a table.")
-    } catch ClaudeJobError.failed(let m) {
-        giveUp("Claude stopped: \(m)")
-    } catch {
-        giveUp("\(error)")
-    }
-
-case "undo":
+case "look":
+    await engine.sample()
+    let t0 = Date()
+    let r = await engine.look(force: args.contains("--force"))
+    for s in r.steps { print("· " + s) }
+    print(String(format: "(%.1fs, Claude $%.4f)", Date().timeIntervalSince(t0), r.claudeCostUSD))
+    for t in r.taps { show(t) }
+case "feed":
+    let f = await engine.feed()
+    print("pending: \(f.pending.count)"); f.pending.forEach(show)
+    print("today: \(f.done.count)"); f.done.forEach(show)
+case "approve":
     guard args.count > 1 else { fail(usage) }
-    let env = Environment.live(store: openStore())
-    struct NoJobs: JobRunner { func runTabsToNote(tap: Tap) async throws -> String { throw ClaudeJobError.notInstalled } }
-    struct NeverQuiet: QuietRules { func isQuiet() -> Bool { false } }
-    let engine = Engine(env: env, watchers: [], judge: RuleJudge(), quiet: NeverQuiet(), jobs: NoJobs())
-    let t = await engine.undo(args[1])
-    print("\(t.id): \(t.state.rawValue)\(t.note.map { " (\($0))" } ?? "")")
-
-case "terminal-test":
-    let term = TerminalLauncher(runner: OSAScriptRunner())
-    do {
-        let id = try await term.open(command: "echo 'Sparehand opened this window and will close it in 3 seconds.'", title: "Sparehand test")
-        print("opened Terminal window \(id)")
-        try await Task.sleep(for: .seconds(3))
-        try await term.close(windowID: id)
-        print("closed it")
-    } catch { fail("terminal-test failed: \(error)") }
-
-case "note-test":
-    let notes = NotesWriter(runner: OSAScriptRunner())
-    do {
-        let id = try await notes.create(title: "Sparehand test note", html: "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>")
-        print("created note \(id)")
-        try await Task.sleep(for: .seconds(2))
-        try await notes.delete(noteID: id)
-        print("deleted it")
-    } catch { fail("note-test failed: \(error)") }
-
+    guard let t = await engine.approve(args[1], progress: { print("  … " + $0) }) else { fail("no such card") }
+    show(t)
+case "undo":
+    guard args.count > 1, let t = await engine.undo(args[1]) else { fail("nothing to undo") }
+    show(t)
+case "dismiss":
+    guard args.count > 1 else { fail(usage) }
+    await engine.dismiss(args[1]); print("dismissed")
+case "never":
+    guard args.count > 1 else { fail(usage) }
+    await engine.never(args[1]); print("won't offer that again")
+case "memory":
+    for m in await engine.memory() { print("- " + m) }
+case "skills":
+    for s in Skills.all(env.store) { print("- \(s.titleTemplate)  [\(s.steps.map(\.tool).joined(separator: ", "))]  min \(s.minCount)") }
 case "demo-seed":
-    await DemoSeed.run(args: Array(args.dropFirst()))
-
+    DemoSeed.run(home: env.home, count: Int(args.dropFirst().first ?? "25") ?? 25)
 default:
     print(usage)
 }

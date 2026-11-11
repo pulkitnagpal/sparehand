@@ -35,9 +35,3 @@ public struct Environment: Sendable {
         return e
     }
 }
-
-/// Notices one kind of thing and proposes what to do about it.
-public protocol Watcher: Sendable {
-    var id: WatcherID { get }
-    func candidates(_ env: Environment) async throws -> [Candidate]
-}

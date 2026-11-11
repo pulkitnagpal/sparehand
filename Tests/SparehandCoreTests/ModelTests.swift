@@ -3,33 +3,27 @@ import Testing
 @testable import SparehandCore
 
 @Suite struct ModelTests {
-    let tab = Tab(browser: "Google Chrome", title: "Best standing desks", url: URL(string: "https://example.com/desks")!)
-
     @Test func candidateRoundTrips() throws {
-        let plans: [ActionPlan] = [
-            .moveFiles([FileMove(from: URL(fileURLWithPath: "/a.png"), to: URL(fileURLWithPath: "/b/a.png"))]),
-            .deletePermanently([URL(fileURLWithPath: "/t/x.dmg")]),
-            .tabsToNote(topic: "Standing Desks", tabs: [tab]),
-        ]
-        for plan in plans {
-            let c = Candidate(id: "abc", watcher: .tabs, summary: "s", facts: ["count": "7"],
-                              evidence: [EvidenceItem(label: "l", detail: "d")], plan: plan,
-                              noticedAt: Date(timeIntervalSince1970: 1_800_000_000))
-            let back = try JSONDecoder().decode(Candidate.self, from: JSONEncoder().encode(c))
-            #expect(back == c)
-        }
+        let c = Candidate(id: "abc", origin: .claude, why: "25 screenshots",
+                          evidence: [EvidenceItem(label: "l", detail: "d")],
+                          steps: [ToolCall(tool: "sort_by_content", args: .object(["files": .object(["folder": .string("Desktop")]),
+                                                                                   "folders": .array([.string("Travel")])]))],
+                          noticedAt: Date(timeIntervalSince1970: 1_800_000_000), repeatTitle: "{count} new screenshots")
+        let back = try JSONDecoder().decode(Candidate.self, from: JSONEncoder().encode(c))
+        #expect(back == c)
     }
 
     @Test func fingerprintIsOrderIndependent() {
-        let a = Fingerprint.make(.screenshots, ["b", "a"])
-        #expect(a == Fingerprint.make(.screenshots, ["a", "b"]))
+        let a = Fingerprint.make("sort", ["b", "a"])
+        #expect(a == Fingerprint.make("sort", ["a", "b"]))
         #expect(a.count == 16)
-        #expect(a != Fingerprint.make(.bin, ["a", "b"]))
+        #expect(a != Fingerprint.make("bin", ["a", "b"]))
     }
 
-    @Test func reversibility() {
-        #expect(ActionPlan.moveFiles([]).isReversible)
-        #expect(!ActionPlan.deletePermanently([]).isReversible)
-        #expect(ActionPlan.tabsToNote(topic: "x", tabs: []).isReversible)
+    @Test func everyToolIsReversible() {
+        let c = Candidate(id: "x", origin: .claude, why: "", steps: Tools.all.map { ToolCall(tool: $0.name, args: .object([:])) }, noticedAt: Date())
+        #expect(c.isReversible)
+        let unknown = Candidate(id: "y", origin: .claude, why: "", steps: [ToolCall(tool: "rm_rf", args: .null)], noticedAt: Date())
+        #expect(!unknown.isReversible)
     }
 }

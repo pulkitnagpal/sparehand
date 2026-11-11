@@ -37,7 +37,7 @@ public struct TerminalLauncher: Sendable {
     }
 
     /// AppleScript bounds: {left, top, right, bottom} in global screen points.
-    static func bounds(_ r: CGRect) -> String {
+    public static func bounds(_ r: CGRect) -> String {
         "{\(Int(r.minX)), \(Int(r.minY)), \(Int(r.maxX)), \(Int(r.maxY))}"
     }
 }

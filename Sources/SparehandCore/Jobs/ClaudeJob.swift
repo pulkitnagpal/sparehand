@@ -70,7 +70,7 @@ public enum ClaudeJob {
         return String(text[start.lowerBound..<end.upperBound])
     }
 
-    static let allowed: Set<String> = ["table", "thead", "tbody", "tr", "th", "td", "b", "strong", "i", "em", "a", "br"]
+    static let allowed: Set<String> = ["table", "thead", "tbody", "tr", "th", "td", "b", "strong", "i", "em", "a", "br", "h2", "h3", "p", "ul", "ol", "li"]
     static let dropWithContent: Set<String> = ["script", "style", "iframe", "object", "svg", "noscript"]
 
     /// Keeps only simple table markup; links only with http(s) hrefs; every other tag and attribute is dropped.

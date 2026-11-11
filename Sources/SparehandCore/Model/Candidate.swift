@@ -1,12 +1,12 @@
 import CryptoKit
 import Foundation
 
-/// The kinds of thing Sparehand watches in milestone 1.
-public enum WatcherID: String, Codable, Sendable, CaseIterable {
-    case screenshots, bin, tabs
+/// Who came up with an offer: Claude looking at a new situation, or a skill Sparehand learned and runs on this Mac.
+public enum Origin: String, Codable, Sendable, CaseIterable {
+    case claude, skill
 }
 
-/// One line of proof shown on a tap card ("Xcode_26.dmg" / "6.2 GB").
+/// One line of proof shown on a tap card ("Screenshot 2026-02-03.png" / "4 months old").
 public struct EvidenceItem: Codable, Sendable, Equatable {
     public var label: String
     public var detail: String
@@ -26,40 +26,34 @@ public struct Tab: Codable, Sendable, Equatable, Hashable {
     public init(browser: String, title: String, url: URL) { self.browser = browser; self.title = title; self.url = url }
 }
 
-/// What Sparehand will do if the user approves.
-public enum ActionPlan: Codable, Sendable, Equatable {
-    case moveFiles([FileMove])
-    case deletePermanently([URL])
-    case tabsToNote(topic: String, tabs: [Tab])
-
-    /// Undo exists for moves (move back) and notes (delete the note); permanent deletion has none.
-    public var isReversible: Bool {
-        if case .deletePermanently = self { return false }
-        return true
-    }
-}
-
-/// Something a watcher noticed. Numbers are already computed in code; the judge only decides and words it.
+/// An offer: the steps Sparehand will run if the user approves, and why it was noticed.
 public struct Candidate: Codable, Sendable, Equatable, Identifiable {
     public var id: String
-    public var watcher: WatcherID
-    public var summary: String
-    public var facts: [String: String]
+    public var origin: Origin
+    /// "Why I noticed": one plain sentence.
+    public var why: String
     public var evidence: [EvidenceItem]
-    public var plan: ActionPlan
+    public var steps: [ToolCall]
     public var noticedAt: Date
+    /// The skill this offer came from (origin .skill).
+    public var skillID: String?
+    /// The card title to use when this offer repeats, with "{count}" for the new item count.
+    public var repeatTitle: String?
 
-    public init(id: String, watcher: WatcherID, summary: String, facts: [String: String] = [:],
-                evidence: [EvidenceItem], plan: ActionPlan, noticedAt: Date) {
-        self.id = id; self.watcher = watcher; self.summary = summary; self.facts = facts
-        self.evidence = evidence; self.plan = plan; self.noticedAt = noticedAt
+    public init(id: String, origin: Origin, why: String, evidence: [EvidenceItem] = [], steps: [ToolCall], noticedAt: Date,
+                skillID: String? = nil, repeatTitle: String? = nil) {
+        self.id = id; self.origin = origin; self.why = why; self.evidence = evidence; self.steps = steps
+        self.noticedAt = noticedAt; self.skillID = skillID; self.repeatTitle = repeatTitle
     }
+
+    /// Every step can be undone.
+    public var isReversible: Bool { steps.allSatisfy { Tools.spec($0.tool)?.reversible ?? false } }
 }
 
-/// A stable id for a candidate: the same files or tabs give the same id, whatever order they were found in.
+/// A stable id from what an offer would touch: the same tool on the same targets gives the same id.
 public enum Fingerprint {
-    public static func make(_ watcher: WatcherID, _ keys: [String]) -> String {
-        let text = ([watcher.rawValue] + keys.sorted()).joined(separator: "\n")
+    public static func make(_ kind: String, _ keys: [String]) -> String {
+        let text = ([kind] + keys.sorted()).joined(separator: "\n")
         return SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined().prefix(16).description
     }
 }

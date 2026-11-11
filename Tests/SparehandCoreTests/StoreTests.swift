@@ -2,9 +2,10 @@ import Foundation
 import Testing
 @testable import SparehandCore
 
-func sampleTap(id: String = "t1", watcher: WatcherID = .screenshots, state: TapState = .pending, at: TimeInterval = 1_800_000_000) -> Tap {
-    let c = Candidate(id: id, watcher: watcher, summary: "s", evidence: [], plan: .moveFiles([]), noticedAt: Date(timeIntervalSince1970: at))
-    let v = Verdict(show: true, value: 3, title: "T", body: "B", actionLabel: "Do", source: .rules)
+func sampleTap(id: String = "t1", origin: Origin = .claude, state: TapState = .pending, at: TimeInterval = 1_800_000_000) -> Tap {
+    let c = Candidate(id: id, origin: origin, why: "w", steps: [ToolCall(tool: "show_report", args: .object(["text": .string("hi")]))],
+                      noticedAt: Date(timeIntervalSince1970: at))
+    let v = Verdict(title: "T", body: "B", actionLabel: "Do", confidence: 4)
     return Tap(candidate: c, verdict: v, state: state, createdAt: Date(timeIntervalSince1970: at))
 }
 
@@ -29,12 +30,11 @@ func sampleTap(id: String = "t1", watcher: WatcherID = .screenshots, state: TapS
         #expect(try s.taps(states: [.pending, .done]).count == 3)
     }
 
-    @Test func lastShownPerWatcher() throws {
+    @Test func tapsSince() throws {
         let s = try Store.inMemory()
-        try s.upsert(sampleTap(id: "a", watcher: .bin, at: 100))
-        try s.upsert(sampleTap(id: "b", watcher: .bin, at: 500))
-        #expect(try s.lastShown(watcher: .bin) == Date(timeIntervalSince1970: 500))
-        #expect(try s.lastShown(watcher: .tabs) == nil)
+        try s.upsert(sampleTap(id: "a", at: 100))
+        try s.upsert(sampleTap(id: "b", origin: .skill, at: 500))
+        #expect(try s.taps(since: Date(timeIntervalSince1970: 300)).map(\.id) == ["b"])
     }
 
     @Test func firstSeenIsSticky() throws {

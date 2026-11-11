@@ -20,8 +20,8 @@ struct OnboardingView: View {
         _ = refresh
         return [
             Permission(id: "fda", name: "Full Disk Access",
-                       why: "Look inside the Bin so it can offer to empty its biggest items.",
-                       granted: BinAccess.canRead(model.env.trash),
+                       why: "See how much the Bin holds, so it can tell you when it is worth emptying.",
+                       granted: (try? FileManager.default.contentsOfDirectory(atPath: model.env.trash.path)) != nil,
                        action: { Self.open("Privacy_AllFiles") }),
             Permission(id: "screen", name: "Screen Recording",
                        why: "Show you Sparehand's own screen live while it works. It never records yours.",
@@ -57,7 +57,7 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 14) {
                 Text("PERMISSIONS").font(.system(size: 12, weight: .semibold)).kerning(0.5).foregroundStyle(Theme.muted)
                 Text("Give it only what you're comfortable with").font(Theme.heading(22)).foregroundStyle(Theme.ink)
-                Text("Each permission unlocks a few watchers. Skip any and turn it on later from the menu bar.")
+                Text("Each permission lets Sparehand see a little more. Skip any and turn it on later from the menu bar.")
                     .font(.system(size: 14)).foregroundStyle(Theme.body)
                 ForEach(permissions) { p in
                     HStack(spacing: 14) {
@@ -77,7 +77,7 @@ struct OnboardingView: View {
                     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.hairline))
                 }
                 HStack {
-                    Text(model.judgeStatus).font(.system(size: 12)).foregroundStyle(Theme.muted)
+                    Text(model.status).font(.system(size: 12)).foregroundStyle(Theme.muted)
                     Spacer()
                     Button("Check again") { refresh += 1 }.buttonStyle(PillButton(fill: .white, text: Theme.ink, border: Theme.hairline))
                     Button("Continue", action: onDone).buttonStyle(PillButton(fill: Theme.decide, text: .white))

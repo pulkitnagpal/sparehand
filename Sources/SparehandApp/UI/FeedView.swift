@@ -16,7 +16,7 @@ struct FeedView: View {
                     Circle().fill(model.isPaused ? Theme.pending : Theme.working).frame(width: 7, height: 7)
                     Text(model.isPaused ? "Paused" : "Watching quietly").font(.system(size: 12)).foregroundStyle(Theme.body)
                 }
-                Text(model.judgeStatus).font(.system(size: 12)).foregroundStyle(Theme.muted)
+                Text(model.status).font(.system(size: 12)).foregroundStyle(Theme.muted)
             }
             .padding(16)
 
@@ -29,7 +29,11 @@ struct FeedView: View {
                     }
                     ForEach(model.pending) { tap in
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(tap.verdict.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.ink)
+                            HStack {
+                                Text(tap.verdict.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.ink)
+                                Spacer()
+                                Text(tap.candidate.origin == .skill ? "on your Mac" : "asked Claude").font(.system(size: 11)).foregroundStyle(Theme.muted)
+                            }
                             Text(tap.verdict.body).font(.system(size: 13)).foregroundStyle(Theme.body).fixedSize(horizontal: false, vertical: true)
                             HStack(spacing: 6) {
                                 Button(tap.verdict.actionLabel) { model.approve(tap) }.buttonStyle(PillButton(fill: Theme.decide, text: .white))
@@ -51,7 +55,7 @@ struct FeedView: View {
                                 if let note = tap.note { Text(note).font(.system(size: 12)).foregroundStyle(Theme.muted) }
                             }
                             Spacer()
-                            if tap.state == .done && tap.candidate.plan.isReversible {
+                            if tap.state == .done && tap.candidate.isReversible {
                                 Button("Undo") { model.undo(tap) }.buttonStyle(PillButton(fill: .white, text: Theme.ink, border: Theme.hairline))
                             }
                         }
@@ -65,7 +69,7 @@ struct FeedView: View {
             HStack(spacing: 12) {
                 Button(model.isPaused ? "Resume" : "Pause 1 hour") { model.isPaused ? model.resume() : model.pause(hours: 1) }
                     .buttonStyle(PillButton(fill: .white, text: Theme.ink, border: Theme.hairline))
-                Button("Scan now") { Task { await model.tick() } }
+                Button("Look now") { Task { await model.look(force: true) } }
                     .buttonStyle(PillButton(fill: .white, text: Theme.ink, border: Theme.hairline))
                 Spacer()
                 Button("Permissions", action: openOnboarding).buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Theme.body)
