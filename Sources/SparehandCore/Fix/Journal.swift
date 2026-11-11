@@ -15,7 +15,7 @@ public struct MoveReport: Sendable, Equatable {
 }
 
 /// Moves files without ever overwriting, journals each completed move, and can put them back.
-public struct FileMover: Sendable {
+public struct FileMover: @unchecked Sendable {
     let store: Store
     let fileManager: FileManager
 
