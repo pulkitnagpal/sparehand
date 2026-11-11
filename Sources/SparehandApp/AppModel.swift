@@ -41,7 +41,7 @@ final class AppModel: ObservableObject {
     let store: Store
     let env: SparehandCore.Environment
     let screen = AgentScreen()
-    let claude: ClaudeBackend?
+    @Published private(set) var claude: ClaudeBackend?
     private(set) var engine: Engine!
     private var sampleTimer: Timer?
     private var lookTimer: Timer?
@@ -54,11 +54,29 @@ final class AppModel: ObservableObject {
         catch { fatalError("Sparehand can't open its database: \(error)") }
         env = SparehandCore.Environment.live(store: store)
         claude = Claude.fromKeychain()
-        // --demo: for walkthroughs and recordings. No card limits or quiet times, and new files are looked at within seconds.
+        engine = Self.makeEngine(env: env, claude: claude)
+    }
+
+    /// --demo: for walkthroughs and recordings. No card limits or quiet times, and new files are looked at within seconds.
+    static func makeEngine(env: SparehandCore.Environment, claude: ClaudeBackend?) -> Engine {
         var limits = Limits()
-        if Self.demo { limits.perHour = 99; limits.perDay = 99; limits.idleSeconds = .infinity }
-        engine = Engine(env: env, senses: Senses(env: env), local: LocalModel(), claude: claude,
-                        quiet: Self.demo ? NeverQuiet() as any QuietRules : DesktopQuietRules(), limits: limits)
+        if demo { limits.perHour = 99; limits.perDay = 99; limits.idleSeconds = .infinity }
+        return Engine(env: env, senses: Senses(env: env), local: LocalModel(), claude: claude,
+                      quiet: demo ? NeverQuiet() as any QuietRules : DesktopQuietRules(), limits: limits)
+    }
+
+    /// Checks a pasted API key with one tiny call, then keeps it in Keychain and uses it from now on.
+    func connect(apiKey: String) async -> Bool {
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard key.hasPrefix("sk-ant-") else { return false }
+        // A Claude subscription token (development and demos) runs through Claude Code; an API key goes straight to the API.
+        let isToken = key.hasPrefix("sk-ant-oat")
+        let backend: ClaudeBackend = isToken ? ClaudeCLI(token: key) : ClaudeAPI(key: key)
+        guard (try? await backend.complete(system: "Reply with OK.", user: "ping")) != nil else { return false }
+        guard Keychain.save(isToken ? Keychain.oauthService : Keychain.apiKeyService, key) else { return false }
+        claude = backend
+        engine = Self.makeEngine(env: env, claude: claude)
+        return true
     }
 
     static let demo = CommandLine.arguments.contains("--demo")
@@ -96,7 +114,7 @@ final class AppModel: ObservableObject {
     }
 
     func approve(_ tap: Tap) {
-        tapPanel.set(tap, .working(tap.candidate.steps.contains { WatchableRun.fileTools.contains($0.tool) } ? "Starting on Sparehand's screen…" : "Starting…"))
+        tapPanel.set(tap, .working(tap.candidate.steps.contains { WatchableRun.watched.contains($0.tool) } ? "Starting on Sparehand's screen…" : "Starting…"))
         busyTapID = tap.id
         Task {
             let result = await runner.run(tap) { [weak self] line in self?.tapPanel.set(tap, .working(line)) }

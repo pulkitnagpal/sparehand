@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 public protocol HTTPTransport: Sendable {
     func post(_ url: URL, headers: [String: String], body: Data, timeout: TimeInterval) async throws -> Data
@@ -90,10 +91,27 @@ public protocol ClaudeBackend: Sendable {
 }
 
 public enum Keychain {
-    /// Reads a generic password with /usr/bin/security (whose access the item was created with). Never logged.
+    /// Reads a generic password: this app's own item first, then one made with the `security` tool (development). Never logged.
     public static func read(_ service: String) -> String? {
+        let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                                kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne,
+                                kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail]
+        var out: CFTypeRef?
+        if SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data, let s = String(data: d, encoding: .utf8), !s.isEmpty {
+            return s
+        }
         let s = Shell.run("/usr/bin/security", ["find-generic-password", "-s", service, "-w"], timeout: 10).trimmingCharacters(in: .whitespacesAndNewlines)
         return s.isEmpty ? nil : s
+    }
+
+    /// Saves (or replaces) a generic password for this app.
+    @discardableResult
+    public static func save(_ service: String, _ value: String) -> Bool {
+        let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: "sparehand"]
+        SecItemDelete(base as CFDictionary)
+        var add = base
+        add[kSecValueData as String] = Data(value.utf8)
+        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
     }
     public static let apiKeyService = "sparehand.anthropic-key"
     public static let oauthService = "sparehand.claude-oauth"
@@ -261,12 +279,12 @@ public enum Validator {
                 targets += files.map(\.lastPathComponent)
                 evidence += files.prefix(3).map { EvidenceItem(label: $0.lastPathComponent, detail: sel.folder) }
                 measured = measured ?? (s.tool == "move_to_bin" ? "Frees \(size(files))" : "\(files.count) files off your \(sel.folder)")
-            case "close_tabs":
+            case "close_tabs", "research_to_note":
                 let urls = s.args["urls"]?.strings.map(Redactor.url) ?? []
                 guard !urls.isEmpty, urls.allSatisfy(snapTabs.contains) else { return .failure(.init("close_tabs: tab not open")) }
                 targets += urls
                 evidence += snapshot.tabs.filter { urls.contains(Redactor.url($0.url.absoluteString)) }.prefix(3).map { EvidenceItem(label: $0.title, detail: $0.browser) }
-                measured = measured ?? "\(urls.count) fewer tabs open"
+                measured = measured ?? (s.tool == "close_tabs" ? "\(urls.count) fewer tabs open" : "\(urls.count) tabs → one note")
             case "stop_container":
                 let names = s.args["names"]?.strings ?? []
                 guard !names.isEmpty, names.allSatisfy(snapshot.containers.contains) else { return .failure(.init("stop_container: not running")) }

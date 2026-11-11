@@ -27,6 +27,16 @@ public struct NotesWriter: Sendable {
         try await runner.run(Self.createScript(title: title, html: html)).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Appends HTML to a note's body (used to write a note piece by piece while the user watches).
+    public func append(noteID: String, html: String) async throws {
+        _ = try await runner.run("""
+            tell application "Notes"
+              set n to note id \(AppleScriptText.quoted(noteID))
+              set body of n to (body of n) & \(AppleScriptText.quoted(html))
+            end tell
+            """)
+    }
+
     public func delete(noteID: String) async throws {
         _ = try await runner.run("tell application \"Notes\" to delete note id \(AppleScriptText.quoted(noteID))")
     }

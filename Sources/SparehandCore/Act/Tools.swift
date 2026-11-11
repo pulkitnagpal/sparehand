@@ -57,6 +57,8 @@ public struct ToolContext: Sendable {
     public var env: Environment
     public var local: LocalModel?
     public var progress: @Sendable (String) -> Void
+    /// Called once a note exists, so the app can put its window on Sparehand's screen before it is written.
+    public var noteCreated: @Sendable (String) async -> Void = { _ in }
     public init(env: Environment, local: LocalModel?, progress: @escaping @Sendable (String) -> Void = { _ in }) {
         self.env = env; self.local = local; self.progress = progress
     }
@@ -87,6 +89,7 @@ public enum Tools {
         ToolSpec(name: "quit_app", prompt: #"quit_app(name: "<running app>"): quit an app; it can be reopened. Reversible."#, reversible: true),
         ToolSpec(name: "stop_container", prompt: #"stop_container(names: ["<container>"]): stop Docker containers; they can be started again. Reversible."#, reversible: true),
         ToolSpec(name: "close_tabs", prompt: #"close_tabs(urls: ["<url exactly as in the snapshot>"]): close browser tabs; they can be reopened. Reversible."#, reversible: true),
+        ToolSpec(name: "research_to_note", prompt: #"research_to_note(urls: ["<url exactly as in the snapshot>"], title: "<note title>", goal: "<what the note should help the user do>"): Claude reads those pages and Sparehand writes a short note in Apple Notes (key points, open questions, next step) that the user can watch being written. Reversible."#, reversible: true),
         ToolSpec(name: "create_note", prompt: #"create_note(title: "<title>", html: "<simple HTML: h2, p, ul, li, b, a>"): create a note in Apple Notes. Reversible."#, reversible: true),
         ToolSpec(name: "show_report", prompt: #"show_report(text: "<=60 words"): tell the user something useful; changes nothing."#, reversible: true),
     ]
@@ -192,6 +195,24 @@ public enum Tools {
                 try addUndo(UndoRecord(kind: "reopen_tabs", values: group.map(\.url.absoluteString), extra: browser), tapID: tapID, store: env.store)
             }
             return "Closed \(tabs.count) tabs"
+
+        case "research_to_note":
+            let urls = a["urls"]?.strings ?? []
+            guard !urls.isEmpty else { throw ToolError.badArgs("No pages to read.") }
+            let title = a["title"]?.string ?? "Where you left off"
+            let notes = NotesWriter(runner: env.scripts)
+            let id = try await notes.create(title: title, html: "")
+            try addUndo(UndoRecord(kind: "delete_note", values: [id]), tapID: tapID, store: env.store)
+            await ctx.noteCreated(id)
+            ctx.progress("Claude is reading \(urls.count) pages")
+            let html = try await ResearchJob.run(urls: urls, goal: a["goal"]?.string ?? "pick this up later", progress: ctx.progress)
+            let blocks = ResearchJob.blocks(html)
+            for (i, b) in blocks.enumerated() {
+                ctx.progress("Writing the note · \(i + 1) of \(blocks.count)")
+                try await notes.append(noteID: id, html: b)
+                try await Task.sleep(for: .milliseconds(450))
+            }
+            return "Wrote “\(title)” in Notes"
 
         case "create_note":
             let title = a["title"]?.string ?? "Sparehand note"

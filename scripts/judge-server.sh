@@ -24,11 +24,11 @@ case "${1:-status}" in
     nohup "$VENV/bin/mlx_lm.server" --model "$MODEL" --host 127.0.0.1 --port "$PORT" \
       --chat-template-args '{"enable_thinking":false}' > "$LOG" 2>&1 &
     echo $! > "$PID"
-    for _ in {1..120}; do
+    for _ in {1..${SPAREHAND_JUDGE_WAIT:-120}}; do
       curl -s -o /dev/null "http://127.0.0.1:$PORT/v1/models" && { echo "started (pid $(cat "$PID"))"; exit 0; }
       sleep 1
     done
-    echo "server did not answer within 120 s; see $LOG" >&2; exit 1 ;;
+    echo "server did not answer in time; see $LOG" >&2; exit 1 ;;
   stop)
     if running; then kill "$(cat "$PID")"; rm -f "$PID"; echo "stopped"; else echo "not running"; fi ;;
   status)

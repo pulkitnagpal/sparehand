@@ -143,14 +143,17 @@ public actor Engine {
 
     // MARK: - acting
 
-    public func approve(_ id: String, progress: @escaping @Sendable (String) -> Void = { _ in }) async -> Tap? {
+    public func approve(_ id: String, progress: @escaping @Sendable (String) -> Void = { _ in },
+                        noteCreated: @escaping @Sendable (String) async -> Void = { _ in }) async -> Tap? {
         guard var tap = try? store.tap(id: id) else { return nil }
         tap.state = .running
         try? store.upsert(tap)
         var lines: [String] = []
         do {
             for step in tap.candidate.steps {
-                lines.append(try await Tools.run(step, tapID: tap.id, ctx: ToolContext(env: env, local: local, progress: progress)))
+                var ctx = ToolContext(env: env, local: local, progress: progress)
+                ctx.noteCreated = noteCreated
+                lines.append(try await Tools.run(step, tapID: tap.id, ctx: ctx))
             }
             tap.state = .done
             tap.note = lines.filter { !$0.isEmpty }.joined(separator: " · ")

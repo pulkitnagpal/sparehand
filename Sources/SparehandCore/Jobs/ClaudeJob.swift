@@ -138,3 +138,103 @@ public enum ClaudeJob {
             .replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
     }
 }
+
+
+/// The watchable research job: headless Claude Code reads the pages (WebFetch only) and returns a short HTML note.
+/// Works with the user's API key or, for development and demos, the subscription token.
+public enum ResearchJob {
+    public static func prompt(urls: [String], goal: String) -> String {
+        """
+        The user had these pages open: \(urls.joined(separator: " , ")).
+        Goal: \(goal)
+        Read every page with WebFetch. Then write a short note that lets the user pick this up later, in under 180 words:
+        one <h2> per page or theme with 1-3 <li> key points each (link each page with <a>), then <h2>Open questions</h2> and <h2>Next step</h2>.
+        Use only h2, p, ul, li, b, a. Reply with ONLY the HTML, nothing before or after it.
+        """
+    }
+
+    /// Runs the job, reporting human progress lines ("Reading techrepublic.com…"). Returns sanitized HTML.
+    /// With an API key it uses the Messages API's web_fetch tool (nothing else to install); otherwise headless Claude Code.
+    public static func run(urls: [String], goal: String, progress: @escaping @Sendable (String) -> Void) async throws -> String {
+        if let key = Keychain.read(Keychain.apiKeyService) {
+            return try await viaAPI(key: key, urls: urls, goal: goal, progress: progress)
+        }
+        return try await viaCLI(urls: urls, goal: goal, progress: progress)
+    }
+
+    static func viaAPI(key: String, urls: [String], goal: String, progress: @escaping @Sendable (String) -> Void,
+                       transport: HTTPTransport = URLSessionTransport()) async throws -> String {
+        var messages: [[String: Any]] = [["role": "user", "content": prompt(urls: urls, goal: goal)]]
+        progress("Claude is reading \(urls.count) pages")
+        for _ in 0..<5 {
+            let body: [String: Any] = ["model": "claude-sonnet-5-5", "max_tokens": 2500, "messages": messages,
+                                       "tools": [["type": "web_fetch_20260209", "name": "web_fetch", "max_uses": max(3, urls.count + 2)]]]
+            let data = try await transport.post(URL(string: "https://api.anthropic.com/v1/messages")!,
+                                                headers: ["x-api-key": key, "anthropic-version": "2023-06-01"],
+                                                body: try JSONSerialization.data(withJSONObject: body), timeout: 240)
+            guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw ClaudeJobError.failed("Unreadable answer") }
+            let content = obj["content"] as? [[String: Any]] ?? []
+            for b in content where b["type"] as? String == "server_tool_use" {
+                if let u = (b["input"] as? [String: Any])?["url"] as? String { progress("Read \(URL(string: u)?.host ?? "a page")") }
+            }
+            if obj["stop_reason"] as? String == "pause_turn" {   // long server-tool turn: send it back to continue
+                messages.append(["role": "assistant", "content": content])
+                continue
+            }
+            let text = content.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }.joined()
+            let html = ClaudeJob.sanitize(text)
+            guard html.contains("<") else { throw ClaudeJobError.failed("Claude didn't write the note.") }
+            return html
+        }
+        throw ClaudeJobError.failed("Claude took too long reading the pages.")
+    }
+
+    static func viaCLI(urls: [String], goal: String, progress: @escaping @Sendable (String) -> Void) async throws -> String {
+        guard let claude = Shell.which("claude") else { throw ClaudeJobError.notInstalled }
+        var env = ProcessInfo.processInfo.environment
+        env["CLAUDE_CONFIG_DIR"] = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".sparehand-claude").path
+        if let token = Keychain.read(Keychain.oauthService) { env["CLAUDE_CODE_OAUTH_TOKEN"] = token; env.removeValue(forKey: "ANTHROPIC_API_KEY") }
+        else { throw ClaudeJobError.failed("Connect Claude first.") }
+        let args = ["-p", prompt(urls: urls, goal: goal), "--output-format", "stream-json", "--verbose",
+                    "--allowedTools", "WebFetch", "--tools", "WebFetch", "--max-turns", "14",
+                    "--setting-sources", "", "--no-session-persistence", "--model", "claude-sonnet-5-5"]
+        let lines: [String] = try await Task.detached {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: claude)
+            p.arguments = args
+            p.environment = env
+            p.currentDirectoryURL = URL(fileURLWithPath: "/private/tmp")
+            let out = Pipe()
+            p.standardOutput = out; p.standardError = FileHandle.nullDevice; p.standardInput = FileHandle.nullDevice
+            try p.run()
+            let killer = DispatchWorkItem { if p.isRunning { p.terminate() } }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 300, execute: killer)
+            var all: [String] = [], buffer = Data()
+            let h = out.fileHandleForReading
+            while true {
+                let chunk = h.availableData
+                if chunk.isEmpty { break }
+                buffer.append(chunk)
+                while let nl = buffer.firstIndex(of: 0x0A) {
+                    let line = String(decoding: buffer[buffer.startIndex..<nl], as: UTF8.self)
+                    buffer.removeSubrange(buffer.startIndex...nl)
+                    all.append(line)
+                    if let human = ClaudeJob.progressLine(line), !human.hasPrefix("Done") { progress(human) }
+                }
+            }
+            p.waitUntilExit(); killer.cancel()
+            return all
+        }.value
+        let text = try ClaudeJob.finalText(lines)
+        let html = ClaudeJob.sanitize(text)
+        guard html.contains("<") else { throw ClaudeJobError.failed("Claude didn't write the note.") }
+        return html
+    }
+
+    /// Splits note HTML into blocks to write one at a time (a heading, a list, a paragraph).
+    public static func blocks(_ html: String) -> [String] {
+        let re = try! NSRegularExpression(pattern: "<(h2|h3|p|ul|ol|table)>[\\s\\S]*?</\\1>", options: [.caseInsensitive])
+        let found = re.matches(in: html, range: NSRange(html.startIndex..., in: html)).compactMap { Range($0.range, in: html).map { String(html[$0]) } }
+        return found.isEmpty ? [html] : found
+    }
+}

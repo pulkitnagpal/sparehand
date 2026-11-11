@@ -1,134 +1,91 @@
 import AppKit
 import SparehandCore
 
-/// Runs an approved plan on Sparehand's own screen so the user can watch: a Finder window of the destination fills up
-/// while files are sorted, and a created note opens there. The user's own windows are never touched.
-/// When the job ends the viewer stays up with the result until the user closes it (or a minute passes).
+/// Runs approved plans. Most run in the background and report progress on their card.
+/// A research job runs on Sparehand's own screen so the user can watch: Notes opens there and the note is written
+/// while Claude reads the pages. The user's own windows are never touched.
 @MainActor
 final class WatchableRun {
     let model: AppModel
     init(model: AppModel) { self.model = model }
 
-    static let fileTools: Set<String> = ["sort_by_content", "organize_files"]
+    /// Steps worth watching.
+    static let watched: Set<String> = ["research_to_note"]
 
     func say(_ s: String) { print("[watch] " + s) }
 
     func run(_ tap: Tap, progress: @escaping @MainActor (String) -> Void) async -> Tap? {
-        let fileStep = tap.candidate.steps.first { Self.fileTools.contains($0.tool) }
-        let noteStep = tap.candidate.steps.contains { $0.tool == "create_note" }
-        guard fileStep != nil || noteStep else { say("no watchable step; running directly"); return await model.engine.approve(tap.id) { line in Task { @MainActor in progress(line) } } }
-
+        guard tap.candidate.steps.contains(where: { Self.watched.contains($0.tool) }) else {
+            return await model.engine.approve(tap.id) { line in Task { @MainActor in progress(line) } }
+        }
         let screen = model.screen
         let viewer = LiveViewer(screen: screen)
         let scripts = OSAScriptRunner(timeout: 15)
-        var finderWindows: [String] = []
-        var dest: URL?
-        do {
-            let bounds = try await screen.start()
-            say("agent screen up at \(bounds)")
-            let area = screen.workArea()
-            viewer.setSteps(tap.candidate.steps.map { Self.describe($0) })
-            viewer.status = "Starting on Sparehand's screen…"
-            if let step = fileStep {
-                let d = Tools.folderURL(step.args["into"]?.string ?? "~/Pictures/Screenshots", home: model.env.home)!
-                dest = d
-                try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
-                let source = FileSelector(step.args["files"]).flatMap { Tools.folderURL($0.folder, home: model.env.home) }
-                let half = (area.width - 24) / 2
-                let left = CGRect(x: area.minX, y: area.minY, width: half, height: area.height)
-                let right = CGRect(x: area.minX + half + 24, y: area.minY, width: half, height: area.height)
-                var ids: [CGWindowID] = []
-                for (dir, rect) in [(source, left), (d, right)] {
-                    guard let dir else { continue }
-                    do {
-                        let w = try await scripts.run(Self.finderOpen(dir, rect)).trimmingCharacters(in: .whitespacesAndNewlines)
-                        finderWindows.append(w)
-                    } catch { say("Finder window for \(dir.lastPathComponent) failed: \(error)") }
-                    var cg: CGWindowID?
-                    for _ in 0..<20 where cg == nil {
-                        try await Task.sleep(for: .milliseconds(150))
-                        cg = WindowFinder.windowID(owner: "Finder", title: dir.lastPathComponent, inside: bounds)
-                    }
-                    say("Finder \(dir.lastPathComponent): \(cg.map(String.init) ?? "not found")")
-                    if let cg { ids.append(cg) }
-                }
-                if !ids.isEmpty { try await viewer.start(windowIDs: ids); say("viewer streaming \(ids.count) windows") }
-            }
-            let started = Date()
-            let result = await model.engine.approve(tap.id) { line in
-                Task { @MainActor in
-                    viewer.status = line
-                    progress(line)
-                }
-            }
-            say(String(format: "plan finished in %.1fs: %@", Date().timeIntervalSince(started), result?.note ?? "-"))
-            if noteStep, let bounds = screen.bounds {
-                let notes = NotesWriter(runner: scripts)
-                let running = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Notes").isEmpty
-                let before = await notes.userWindowCount(notesRunning: running)
-                if let ref = Tools.createdNoteID(tapID: tap.id, store: model.store),
-                   let nw = try? await notes.show(noteID: ref, ifNoUserWindows: before) {
-                    try? await notes.setBounds(windowID: nw, area.insetBy(dx: 200, dy: 60))
-                    try await Task.sleep(for: .milliseconds(600))
-                    if let cg = WindowFinder.windowID(owner: "Notes", title: nil, inside: bounds) {
-                        if fileStep == nil { try await viewer.start(windowIDs: [cg]) } else { try? await viewer.add(windowID: cg) }
-                    }
-                }
-            }
-            viewer.finishSteps()
-            viewer.finished = true
-            viewer.needsYou = result?.state == .failed
-            viewer.status = result?.note ?? "Done."
-            await waitForClose(viewer, reveal: dest)
-            for w in finderWindows where !w.isEmpty { _ = try? await scripts.run("tell application \"Finder\" to close window id \(w)") }
-            await viewer.stop()
-            screen.stop()
-            return result
-        } catch {
-            say("failed: \(error)")
-            viewer.needsYou = true
-            viewer.status = "\(error)"
-            await viewer.stop()
-            screen.stop()
-            return await model.engine.tap(tap.id)
+        let notes = NotesWriter(runner: scripts)
+        let bounds: CGRect
+        do { bounds = try await screen.start() } catch {
+            say("no agent screen: \(error); running in the background")
+            return await model.engine.approve(tap.id) { line in Task { @MainActor in progress(line) } }
         }
+        let area = screen.workArea()
+        say("agent screen up at \(bounds)")
+        viewer.setSteps(tap.candidate.steps.map { Self.describe($0) })
+        viewer.status = "Opening Notes on Sparehand's screen…"
+        let notesRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Notes").isEmpty
+        let before = await notes.userWindowCount(notesRunning: notesRunning)
+        let front = NSWorkspace.shared.frontmostApplication
+
+        let result = await model.engine.approve(tap.id, progress: { line in
+            Task { @MainActor in viewer.status = line; progress(line) }
+        }, noteCreated: { noteID in
+            await MainActor.run { self.say("note created") }
+            guard let nw = try? await notes.show(noteID: noteID, ifNoUserWindows: before) else {
+                await MainActor.run { self.say("Notes already has a window open: leaving the user's window alone") }
+                return
+            }
+            try? await notes.setBounds(windowID: nw, area.insetBy(dx: 260, dy: 40))
+            await MainActor.run { _ = front?.activate() }   // give focus back to what the user was doing
+            try? await Task.sleep(for: .milliseconds(700))
+            if let cg = await MainActor.run(body: { WindowFinder.windowID(owner: "Notes", title: nil, inside: bounds) }) {
+                try? await viewer.start(windowIDs: [cg])
+                await MainActor.run { self.say("streaming the Notes window") }
+            }
+        })
+        viewer.finishSteps()
+        viewer.finished = true
+        viewer.needsYou = result?.state == .failed
+        viewer.status = result?.note ?? "Done."
+        if let ref = Tools.createdNoteID(tapID: tap.id, store: model.store) {
+            viewer.onReveal = { Task { _ = try? await scripts.run("tell application \"Notes\"\nshow note id \(AppleScriptText.quoted(ref))\nactivate\nend tell") } }
+        }
+        await waitForClose(viewer)
+        await viewer.stop()
+        screen.stop()
+        return result
     }
 
     /// Keeps the finished viewer up until Close, Show me, or a minute.
-    func waitForClose(_ viewer: LiveViewer, reveal: URL?) async {
+    func waitForClose(_ viewer: LiveViewer) async {
         var closed = false
+        let reveal = viewer.onReveal
         viewer.onClose = { closed = true }
         viewer.onStop = { closed = true }
-        viewer.onReveal = {
-            if let reveal { NSWorkspace.shared.open(reveal) }
-            closed = true
-        }
-        let auto = CommandLine.arguments.contains("--approve-first") ? 8.0 : 60.0
-        let until = Date().addingTimeInterval(auto)
+        viewer.onReveal = { reveal?(); closed = true }
+        let until = Date().addingTimeInterval(60)
         while !closed && Date() < until { try? await Task.sleep(for: .milliseconds(200)) }
     }
 
     static func describe(_ s: ToolCall) -> String {
         switch s.tool {
-        case "sort_by_content": "Read each file and sort it into \((s.args["folders"]?.strings ?? []).prefix(4).joined(separator: ", "))…"
+        case "sort_by_content": "Sort into \((s.args["folders"]?.strings ?? []).prefix(3).joined(separator: ", "))…"
         case "organize_files": "Move files into monthly folders"
         case "move_to_bin": "Move files to the Bin"
         case "close_tabs": "Close \(s.args["urls"]?.strings.count ?? 0) tabs"
         case "stop_container": "Stop " + (s.args["names"]?.strings ?? []).joined(separator: ", ")
         case "quit_app": "Quit \(s.args["name"]?.string ?? "the app")"
         case "create_note": "Write the note “\(s.args["title"]?.string ?? "")”"
+        case "research_to_note": "Read \(s.args["urls"]?.strings.count ?? 0) pages and write “\(s.args["title"]?.string ?? "a note")”"
         default: s.tool
         }
-    }
-
-    static func finderOpen(_ dir: URL, _ rect: CGRect) -> String {
-        """
-        tell application "Finder"
-          set w to make new Finder window to (POSIX file \(AppleScriptText.quoted(dir.path)) as alias)
-          set current view of w to icon view
-          set bounds of w to \(TerminalLauncher.bounds(rect))
-          return id of w
-        end tell
-        """
     }
 }

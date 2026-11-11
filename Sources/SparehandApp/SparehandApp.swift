@@ -38,6 +38,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.setActivationPolicy(.accessory)
         model.start()
+        if CommandLine.arguments.contains("--welcome") {   // demos: start from the Welcome screen, then look
+            showOnboarding()
+            return
+        }
         if CommandLine.arguments.contains("--look-now") {   // testing and demos: look once right away
             Task {
                 try? await Task.sleep(for: .seconds(2))
@@ -61,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             w.contentView = NSHostingView(rootView: OnboardingView(model: model) { [weak self] in
                 try? self?.model.store.setSetting("onboarded", "1")
                 self?.onboarding?.close()
+                if let m = self?.model { Task { await m.look(force: true) } }   // first look right away
             })
             onboarding = w
         }
